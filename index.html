@@ -40,6 +40,11 @@
 .city-foot{padding:16px;color:var(--muted,#666);font-size:.9em}
 </style>
 <script type="module" src="js/city.js"></script>
+<style>
+.city-opening{text-align:center;padding:12vh 16px 8vh;margin:0 auto}
+.city-opening h1{font-size:clamp(2.6rem,9vw,5.5rem);line-height:1.05;margin:0 0 .3em}
+.city-opening p{font-size:clamp(1.15rem,3vw,1.6rem);margin:.4em 0}
+</style>
 </head>
 <body>
 <header class="city-top">
@@ -48,6 +53,11 @@
 </header>
 <main id="main" style="max-width:1000px;margin:0 auto;padding:0 16px">
 <div id="app">
+<div class="city-opening" role="status" aria-live="polite">
+<h1>Opening the doors…</h1>
+<p>The city only shows up after a short wait.</p>
+<p>Please keep this page open. The town is nearly ready.</p>
+</div>
 <h1>Octee City</h1>
 <p>A small town next to FIA with 24 buildings, a bank that pays interest every day, jobs, a police station, a Town Square chat, a Gazette, a Game Tower and games to play. Walking around is free. Working, the bank, the chat, the games and owning buildings need an Octee Airlines login.</p>
 <p>Click a building on the map to see its jobs, property, reviews and games.</p>

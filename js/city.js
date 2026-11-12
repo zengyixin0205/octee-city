@@ -732,11 +732,19 @@ async function loadSetup() {
   for (const jb of j.jobs) if (!JOBS[jb.id]) JOBS[jb.id] = { b: jb.building, title: jb.title, prompt: jb.prompt, right: jb.right, wrong: jb.wrong, hard: jb.hard, ...(jb.prompt2 ? { prompt2: jb.prompt2, right2: jb.right2, wrong2: jb.wrong2 } : {}) };
 }
 
+// The big wait screen. It stays until the town has its data and the first view is drawn.
+function openingBlock() {
+  return el("div", { class: "city-opening", role: "status", "aria-live": "polite" },
+    el("h1", {}, "Opening the doors…"),
+    el("p", {}, "The city only shows up after a short wait."),
+    el("p", {}, "Please keep this page open. The town is nearly ready."));
+}
+
 async function boot() {
   const app = $("#app");
   if (!app) return;
-  await loadSetup();
-  await loadOwners();
+  app.replaceChildren(openingBlock());
+  await Promise.all([loadSetup(), loadOwners()]);
   const go = async () => {
     const h = (location.hash || "").replace("#", "");
     const view = cityIds().includes(h) ? h : "home";
@@ -744,7 +752,6 @@ async function boot() {
     render(app, view);
   };
   window.addEventListener("hashchange", go);
-  app.replaceChildren(el("p", { class: "note" }, "Opening the doors…"));
   await refresh();
   go();
 }
