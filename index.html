@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Octee City</title>
+<meta name="description" content="Octee City, a small town next to FIA. A bank, jobs, a police station that does not like you, and games.">
+<link rel="icon" href="https://zengyixin0205.github.io/Octee-airline/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&family=Playfair+Display:ital,wght@0,700;0,800;1,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://zengyixin0205.github.io/Octee-airline/css/styles.css">
+<style>
+
+.city-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin:16px 0}
+.city-card{display:block;padding:14px;border:1px solid var(--line,#ddd);border-radius:10px;text-decoration:none;color:inherit;background:var(--card,#fff)}
+.city-card h3{margin:0 0 4px}
+.city-poster{display:inline-block;padding:12px;border:2px solid #333;border-radius:4px;background:#f4ecd8;text-align:center;margin:8px 0 12px;max-width:160px}
+.city-poster-title{margin:0;font-weight:700;letter-spacing:.2em}
+.city-poster-pic svg{display:block;margin:0 auto;width:120px;height:auto}
+.city-poster-name{margin:6px 0 2px;font-weight:700}
+.city-job{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line,#eee)}
+.city-quiz{padding:12px;border:1px dashed currentColor;border-radius:10px;margin:10px 0}
+.city-quiz button{display:block;margin:6px 0;width:100%;text-align:left}
+.city-status{padding:10px 12px;border-radius:10px;background:var(--card,#f6f6f6);margin:12px 0}
+.city-warn{color:#b00020;font-weight:700}
+.city-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.city-row input{width:120px}
+.city-table{width:100%;border-collapse:collapse;margin:8px 0}
+.city-table td,.city-table th{padding:6px;border-bottom:1px solid var(--line,#eee);text-align:left}
+.city-map{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:14px 0}
+.city-cell{display:flex;flex-direction:column;justify-content:center;min-height:64px;padding:6px;border:1px solid var(--line,#ddd);border-radius:8px;text-align:center;text-decoration:none;color:inherit;font-size:13px;background:var(--card,#fff)}
+.city-cell small{font-size:11px;opacity:.75}
+.city-cell.fia{background:#e8eef9;font-weight:700}
+.city-cell.road{background:repeating-linear-gradient(90deg,#eee 0 10px,#f7f7f7 10px 20px);font-style:italic}
+@media (max-width:600px){.city-map{grid-template-columns:repeat(3,1fr)}}
+
+.city-top{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line,#ddd)}
+.city-top strong{font-size:1.15em}
+.city-foot{padding:16px;color:var(--muted,#666);font-size:.9em}
+</style>
+<script type="module" src="js/city.js"></script>
+</head>
+<body>
+<header class="city-top">
+  <strong><a href="index.html" style="text-decoration:none">Octee City</a></strong>
+  <nav style="display:flex;gap:12px;flex-wrap:wrap"><a href="https://zengyixin0205.github.io/Octee-airline/">Octee Airlines</a><a href="index.html">The town</a><a href="setup.html">Owner setup</a></nav>
+</header>
+<main id="main" style="max-width:1000px;margin:0 auto;padding:0 16px">
+<div id="app"></div>
+</main>
+<footer class="city-foot">Octee City is a parody town next to FIA. Accounts and money are the Octee Airlines ones; the town itself lives at this address.</footer>
+</body>
+</html>
