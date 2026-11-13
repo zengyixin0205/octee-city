@@ -36,6 +36,23 @@ const B = [
 const FIA = { id: "fia", name: "FIA airport", x: 1280, y: 40, w: 440, h: 190, H: 36, body: "#e8eef4", trim: "#33414e", roof: "flat", runway: true, href: "https://zengyixin0205.github.io/Octee-airline/" };
 const SOLID = [...B, FIA];
 
+// Extra roads: a K shape, joined by a short link road to an F shape, and a side road from the main street down to the south street.
+const ROAD_NET = [
+  { a: [920, 140], b: [920, 280], w: 22 },    // K: stem
+  { a: [920, 210], b: [1040, 140], w: 20 },   // K: upper arm
+  { a: [920, 210], b: [1040, 280], w: 20 },   // K: lower arm
+  { a: [1040, 140], b: [1150, 145], w: 20 },  // link from K to F
+  { a: [1150, 145], b: [1150, 290], w: 22 },  // F: stem
+  { a: [1150, 145], b: [1250, 145], w: 20 },  // F: top bar
+  { a: [1150, 215], b: [1230, 215], w: 20 },  // F: middle bar
+  { a: [1650, 560], b: [1650, 1000], w: 24 }, // side road to the south street
+];
+function distToSeg(px, py, r) {
+  const [ax, ay] = r.a, [bx, by] = r.b, dx = bx - ax, dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
 // The ring road goes all the way round the town, on the outside edges. Stops sit on it, and the Joelmobile drives it.
 const BAND = 36, RC = 18;                       // band width, and the centre line of the ring road
 const RL = W - 2 * RC, RH = H - 2 * RC;        // lengths of the top/bottom and left/right sides
@@ -247,6 +264,7 @@ const trees = [];
     if (y > 990 - pad && y < 1040 + pad) return false;         // south street
     for (const s of SOLID) if (x > s.x - pad && x < s.x + s.w + pad && y > s.y - pad && y < s.y + s.h + pad) return false;
     for (const st of STOPS) if (Math.hypot(x - st.x, y - st.y) < 50) return false;
+    for (const r of ROAD_NET) if (distToSeg(x, y, r) < r.w / 2 + 16) return false;
     for (const t of trees) if (Math.hypot(x - t.x, y - t.y) < 30) return false;
     return true;
   };
@@ -468,12 +486,51 @@ function drawMini(now) {
   g.fillRect(X(0), Y(500), W * sx, 70 * sy);
   g.fillRect(X(0), Y(0), W * sx, BAND * sy); g.fillRect(X(0), Y(H - BAND), W * sx, BAND * sy);
   g.fillRect(X(0), Y(0), BAND * sx, H * sy); g.fillRect(X(W - BAND), Y(0), BAND * sx, H * sy);
+  g.strokeStyle = "#4b4f55";
+  for (const r of ROAD_NET) { g.lineWidth = Math.max(2, r.w * sx); g.beginPath(); g.moveTo(X(r.a[0]), Y(r.a[1])); g.lineTo(X(r.b[0]), Y(r.b[1])); g.stroke(); }
   for (const s of SOLID) { g.fillStyle = s.body; g.fillRect(X(s.x), Y(s.y), s.w * sx, s.h * sy); }
   g.fillStyle = "#1e63c8";
   for (const st of STOPS) { g.beginPath(); g.arc(X(st.x), Y(st.y), 3, 0, 7); g.fill(); }
   g.fillStyle = "#ffd400"; g.beginPath(); g.arc(X(jm.position.x), Y(jm.position.z), 4, 0, 7); g.fill();
   g.fillStyle = "#e0245e"; g.beginPath(); g.arc(X(PLAYER.x), Y(PLAYER.y), 4, 0, 7); g.fill();
 }
+
+// ---- extra roads: asphalt, edge lines, kerbs, centre dashes, lamps and a zebra crossing ----
+function addRoad(r) {
+  const [ax, ay] = r.a, [bx, by] = r.b;
+  const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy), th = Math.atan2(dy, dx);
+  const g = new THREE.Group();
+  const asph = new THREE.Mesh(new THREE.PlaneGeometry(L, r.w), mat("#4b4f55"));
+  asph.rotation.x = -Math.PI / 2; asph.receiveShadow = true; g.add(asph);
+  for (const side of [-1, 1]) {
+    const edge = new THREE.Mesh(new THREE.PlaneGeometry(L, 1.6), mat("#e9e2b5"));
+    edge.rotation.x = -Math.PI / 2; edge.position.set(0, 0.05, side * (r.w / 2 - 2.5)); g.add(edge);
+    const kerb = new THREE.Mesh(new THREE.BoxGeometry(L, 1.4, 3), mat("#d8d2c4"));
+    kerb.position.set(0, 0.7, side * (r.w / 2 + 1.5)); kerb.castShadow = true; g.add(kerb);
+  }
+  for (let t = -L / 2 + 14; t < L / 2 - 10; t += 36) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(18, 2.4), mat("#e9e2b5"));
+    dash.rotation.x = -Math.PI / 2; dash.position.set(t, 0.06, 0); g.add(dash);
+  }
+  g.position.set((ax + bx) / 2, 0.2, (ay + by) / 2);
+  g.rotation.y = -th;
+  scene.add(g);
+  // lamps along one side, a little off the kerb
+  const nx = -dy / L, ny = dx / L, off = r.w / 2 + 7;
+  for (let t = 40; t < L - 20; t += 120) {
+    const px = ax + (dx * t) / L + nx * off, py = ay + (dy * t) / L + ny * off;
+    addLamp(px, py);
+  }
+}
+for (const r of ROAD_NET) addRoad(r);
+function zebra(cx, cz, w, vertical) {
+  for (let i = -2; i <= 2; i++) {
+    const st = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? w - 6 : 4, vertical ? 4 : w - 6), mat("#f4f4f4"));
+    st.rotation.x = -Math.PI / 2; st.position.set(cx + (vertical ? 0 : i * 7), 0.08, cz + (vertical ? i * 7 : 0)); st.receiveShadow = true;
+    scene.add(st);
+  }
+}
+zebra(1650, 586, 24, true);
 
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
