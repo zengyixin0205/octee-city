@@ -39,12 +39,14 @@ const SOLID = [...B, FIA];
 // Extra roads, as segments [x1, y1, x2, y2]. A K joins the main street, and an F joins the south street.
 const ROAD_W = 22;
 const SEGS = [
-  [1200, 250, 1200, 500],   // K: spine, meets the main street
-  [1200, 360, 1400, 250],   // K: upper arm
+  [1200, 250, 1200, 504],   // K: spine, runs into the main street
+  [1200, 360, 1400, 236],   // K: upper arm, runs into the airport
   [1200, 360, 1400, 470],   // K: lower arm
-  [640, 1010, 640, 1140],   // F: spine, meets the south street
-  [640, 1060, 900, 1060],   // F: top bar
-  [640, 1100, 820, 1100],   // F: middle bar
+  [1400, 466, 1400, 504],   // K: lower arm stub, runs into the main street
+  [640, 1006, 640, 1140],   // F: spine, runs into the south street
+  [640, 1060, 930, 1060],   // F: top bar
+  [930, 996, 930, 1060],    // F: stub, runs into the laundrette
+  [640, 1100, 1124, 1100],  // F: middle bar, runs into the lounge
 ];
 function segDist(px, py, [x1, y1, x2, y2]) {
   const dx = x2 - x1, dy = y2 - y1;
@@ -198,17 +200,47 @@ function road(x, y, w, h, tex) {
   if (tex === ROAD_H) t.repeat.set(w / 256, 1); else t.repeat.set(1, h / 256);
   scene.add(m);
 }
-// one straight road piece, with a pavement strip underneath
+// paving tiles with grout lines
+function tileTex(rx, ry) {
+  return canvasTex(128, 128, (g) => {
+    const r = rng(11);
+    g.fillStyle = "#8f8a80"; g.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+      const v = 200 + Math.floor(r() * 22);
+      g.fillStyle = `rgb(${v},${v - 6},${v - 16})`;
+      g.fillRect(x * 32 + 1, y * 32 + 1, 30, 30);
+    }
+  }, [rx, ry]);
+}
+// asphalt with speckles, edge lines and a dashed centre line
+function tarmacTex(len) {
+  return canvasTex(256, 64, (g, w, h) => {
+    const r = rng(5);
+    g.fillStyle = "#4b4f55"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) { g.fillStyle = r() < 0.5 ? "rgba(0,0,0,.14)" : "rgba(255,255,255,.06)"; g.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 2); }
+    g.fillStyle = "#e9e2b5";
+    for (let x = 0; x < w; x += 64) g.fillRect(x + 8, h / 2 - 2, 36, 4);
+    g.fillStyle = "#f4f1e6"; g.fillRect(0, 3, w, 3); g.fillRect(0, h - 6, w, 3);
+  }, [len / 128, 1]);
+}
+// one straight road piece, with tiled pavements and tyre marks
 function roadSeg(x1, y1, x2, y2) {
   const len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1);
   const g = new THREE.Group();
   g.position.set((x1 + x2) / 2, 0, (y1 + y2) / 2);
   g.rotation.y = -ang;
-  const walk = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_W + 14), mat("#c9c4b8"));
+  const walk = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_W + 14), mat("#ffffff", { map: tileTex(len / 64, (ROAD_W + 14) / 64) }));
   walk.rotation.x = -Math.PI / 2; walk.position.y = 0.1; walk.receiveShadow = true; g.add(walk);
-  const t = roadTex(true); t.repeat.set(len / 128, 1);
-  const tar = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_W), mat("#ffffff", { map: t }));
+  const tar = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_W), mat("#ffffff", { map: tarmacTex(len) }));
   tar.rotation.x = -Math.PI / 2; tar.position.y = 0.25; tar.receiveShadow = true; g.add(tar);
+  // tyre marks in each lane, and an oil stain
+  const tyre = new THREE.MeshBasicMaterial({ color: "#16181b", transparent: true, opacity: 0.42, depthWrite: false });
+  for (const [off, a, b] of [[-5, 0.12, 0.46], [5, 0.12, 0.46], [-5, 0.56, 0.9], [5, 0.56, 0.9]]) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(len * (b - a), 2.2), tyre);
+    m.rotation.x = -Math.PI / 2; m.position.set(-len / 2 + (len * (a + b)) / 2, 0.32, off); g.add(m);
+  }
+  const oil = new THREE.Mesh(new THREE.CircleGeometry(4.5, 14), new THREE.MeshBasicMaterial({ color: "#0c0d0f", transparent: true, opacity: 0.35, depthWrite: false }));
+  oil.rotation.x = -Math.PI / 2; oil.scale.set(1.4, 1, 0.8); oil.position.set(len * 0.3 - len / 2, 0.32, -3); g.add(oil);
   scene.add(g);
 }
 for (const [x1, y1, x2, y2] of SEGS) roadSeg(x1, y1, x2, y2);
@@ -521,6 +553,8 @@ function drawMini(now) {
   g.strokeStyle = "#4b4f55";
   for (const r of ROAD_NET) { g.lineWidth = Math.max(2, r.w * sx); g.beginPath(); g.moveTo(X(r.a[0]), Y(r.a[1])); g.lineTo(X(r.b[0]), Y(r.b[1])); g.stroke(); }
   for (const s of SOLID) { g.fillStyle = s.body; g.fillRect(X(s.x), Y(s.y), s.w * sx, s.h * sy); }
+  g.strokeStyle = "#4b4f55"; g.lineCap = "butt"; g.lineWidth = ROAD_W * sx;
+  for (const [x1, y1, x2, y2] of SEGS) { g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke(); }
   g.fillStyle = "#1e63c8";
   for (const st of STOPS) { g.beginPath(); g.arc(X(st.x), Y(st.y), 3, 0, 7); g.fill(); }
   g.fillStyle = "#ffd400"; g.beginPath(); g.arc(X(jm.position.x), Y(jm.position.z), 4, 0, 7); g.fill();
@@ -593,6 +627,16 @@ for (const [x, z, rot] of [[1176, 300, 0], [1176, 330, 0], [760, 1047, Math.PI /
   c.position.set(x, 0, z); c.rotation.y = rot;
 }
 
+// Main street: tiled pavements on both sides, and tyre marks in the lanes.
+for (const z of [493, 577]) {
+  const pv = new THREE.Mesh(new THREE.PlaneGeometry(W, 14), mat("#ffffff", { map: tileTex(W / 64, 14 / 64) }));
+  pv.rotation.x = -Math.PI / 2; pv.position.set(W / 2, 0.15, z); pv.receiveShadow = true; scene.add(pv);
+}
+const laneTyre = new THREE.MeshBasicMaterial({ color: "#16181b", transparent: true, opacity: 0.4, depthWrite: false });
+for (const [x0, x1] of [[300, 430], [980, 1110]]) for (const z of [520, 546]) for (const o of [-3.5, 3.5]) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, 2), laneTyre);
+  m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, 0.32, z + o); scene.add(m);
+}
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
 function action() {
