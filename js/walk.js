@@ -36,6 +36,22 @@ const B = [
 const FIA = { id: "fia", name: "FIA airport", x: 1280, y: 40, w: 440, h: 190, H: 36, body: "#e8eef4", trim: "#33414e", roof: "flat", runway: true, href: "https://zengyixin0205.github.io/Octee-airline/" };
 const SOLID = [...B, FIA];
 
+// Extra roads, as segments [x1, y1, x2, y2]. A K joins the main street, and an F joins the south street.
+const ROAD_W = 22;
+const SEGS = [
+  [1200, 250, 1200, 500],   // K: spine, meets the main street
+  [1200, 360, 1400, 250],   // K: upper arm
+  [1200, 360, 1400, 470],   // K: lower arm
+  [640, 1010, 640, 1140],   // F: spine, meets the south street
+  [640, 1060, 900, 1060],   // F: top bar
+  [640, 1100, 820, 1100],   // F: middle bar
+];
+function segDist(px, py, [x1, y1, x2, y2]) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
 // Extra roads: a K shape, joined by a short link road to an F shape, and a side road from the main street down to the south street.
 const ROAD_NET = [
   { a: [920, 140], b: [920, 280], w: 22 },    // K: stem
@@ -176,11 +192,26 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 600, H + 600), mat("#7
 ground.rotation.x = -Math.PI / 2; ground.position.set(W / 2, -0.2, H / 2); ground.receiveShadow = true;
 scene.add(ground);
 function road(x, y, w, h, tex) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat("#ffffff", { map: tex }));
+  const t = roadTex(tex === ROAD_H);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat("#ffffff", { map: t }));
   m.rotation.x = -Math.PI / 2; m.position.set(x + w / 2, 0.2, y + h / 2); m.receiveShadow = true;
-  if (tex === ROAD_H) tex.repeat.set(w / 256, 1); else tex.repeat.set(1, h / 256);
+  if (tex === ROAD_H) t.repeat.set(w / 256, 1); else t.repeat.set(1, h / 256);
   scene.add(m);
 }
+// one straight road piece, with a pavement strip underneath
+function roadSeg(x1, y1, x2, y2) {
+  const len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1);
+  const g = new THREE.Group();
+  g.position.set((x1 + x2) / 2, 0, (y1 + y2) / 2);
+  g.rotation.y = -ang;
+  const walk = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_W + 14), mat("#c9c4b8"));
+  walk.rotation.x = -Math.PI / 2; walk.position.y = 0.1; walk.receiveShadow = true; g.add(walk);
+  const t = roadTex(true); t.repeat.set(len / 128, 1);
+  const tar = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_W), mat("#ffffff", { map: t }));
+  tar.rotation.x = -Math.PI / 2; tar.position.y = 0.25; tar.receiveShadow = true; g.add(tar);
+  scene.add(g);
+}
+for (const [x1, y1, x2, y2] of SEGS) roadSeg(x1, y1, x2, y2);
 road(0, 500, W, 70, ROAD_H);                          // main street
 road(0, 1002, W, 32, ROAD_H);                         // south street
 road(0, 0, W, BAND, ROAD_H); road(0, H - BAND, W, BAND, ROAD_H);   // ring, top and bottom
@@ -264,6 +295,7 @@ const trees = [];
     if (y > 990 - pad && y < 1040 + pad) return false;         // south street
     for (const s of SOLID) if (x > s.x - pad && x < s.x + s.w + pad && y > s.y - pad && y < s.y + s.h + pad) return false;
     for (const st of STOPS) if (Math.hypot(x - st.x, y - st.y) < 50) return false;
+    for (const sg of SEGS) if (segDist(x, y, sg) < ROAD_W / 2 + pad + 14) return false;
     for (const r of ROAD_NET) if (distToSeg(x, y, r) < r.w / 2 + 16) return false;
     for (const t of trees) if (Math.hypot(x - t.x, y - t.y) < 30) return false;
     return true;
@@ -531,6 +563,35 @@ function zebra(cx, cz, w, vertical) {
   }
 }
 zebra(1650, 586, 24, true);
+
+// ---- more detail: crosswalk, awnings, benches, bins, lamps on the new roads, parked cars ----
+// Crosswalk across the main street, just west of the bus stop.
+for (let i = 0; i < 8; i++) {
+  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(5, 18), mat("#f4f4f0"));
+  stripe.rotation.x = -Math.PI / 2; stripe.position.set(410 + i * 9, 0.32, 535); scene.add(stripe);
+}
+// Awning, bench and bin at each building's door.
+for (const s of B) {
+  if (s.roof === "none") continue;
+  const cx = s.x + s.w / 2, dz = s.y + s.h + 10;
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(38, 2.5, 10), mat(s.trim)); awning.position.set(cx, 30, s.y + s.h + 6); awning.castShadow = true; scene.add(awning);
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(14, 4, 4), mat("#8b5a2b")); bench.position.set(cx - 34, 3, dz); bench.castShadow = true; scene.add(bench);
+  const bin = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 7, 10), mat("#2f5d3a")); bin.position.set(cx + 34, 3.5, dz); bin.castShadow = true; scene.add(bin);
+}
+// Lamps along the new roads, on one side.
+for (const [x1, y1, x2, y2] of SEGS) {
+  const len = Math.hypot(x2 - x1, y2 - y1), n = Math.max(1, Math.floor(len / 80));
+  const nx = -(y2 - y1) / len, ny = (x2 - x1) / len;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    addLamp(x1 + (x2 - x1) * t + nx * (ROAD_W / 2 + 8), y1 + (y2 - y1) * t + ny * (ROAD_W / 2 + 8));
+  }
+}
+// A few parked cars: two on the K spine, one on the F top bar.
+for (const [x, z, rot] of [[1176, 300, 0], [1176, 330, 0], [760, 1047, Math.PI / 2]]) {
+  const c = makeCar(CAR_COLS[(x + z) % CAR_COLS.length]);
+  c.position.set(x, 0, z); c.rotation.y = rot;
+}
 
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
