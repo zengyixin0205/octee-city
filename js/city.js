@@ -177,11 +177,448 @@ function hub() {
     el("p", { class: "note" }, "Nothing here is real. The bank is not a real bank. The police are not a real police. The town is not a town. Everything you earn is parody money.")];
 }
 
+// Extra questions for the built-in jobs. Every job has at least two questions; the hard jobs have three. Each entry: [question, right answer, [wrong, wrong]].
+const EXTRA_STEPS = {
+ "bank-teller": [
+  [
+   "Your deposit slip says 'withdraw everything'. The vault is closed. What do you say?",
+   "Check the vault is on the right side of the wall, then offer a biscuit.",
+   [
+    "Hand over the vault",
+    "Ask the customer to come back in a year, with interest"
+   ]
+  ],
+  [
+   "A customer wants a better exchange rate, from the till. The rate is the same. You say…",
+   "Explain the rate is the same, and that the town keeps the gap.",
+   [
+    "Give them a better rate from the till",
+    "Call the police to make it fair"
+   ]
+  ]
+ ],
+ "bank-vault": [
+  [
+   "The vault combination is written on the wall. The wall is also the vault. What now?",
+   "Politely ask the vault to open itself.",
+   [
+    "Write the combination on a second wall",
+    "Tell the knocking inside the combination"
+   ]
+  ],
+  [
+   "The next guard asks for the key. The key is inside the vault. You say…",
+   "The key is in the vault, which is locked, which is the point.",
+   [
+    "Lend them the vault",
+    "Let the next guard knock"
+   ]
+  ]
+ ],
+ "hall-stamp": [
+  [
+   "A form must be stamped within five days. It arrived in six. Your stamp says…",
+   "'Received late, stamped on time.' The stamp insists.",
+   [
+    "'Approved, retrospectively, by the stamp'",
+    "'Rejected, the stamp was on holiday'"
+   ]
+  ]
+ ],
+ "hall-notes": [
+  [
+   "The minutes must record a decision, and the meeting decided nothing. You write…",
+   "'It was decided to decide later.'",
+   [
+    "'The meeting was cancelled.'",
+    "'A decision was made, and it was lunch.'"
+   ]
+  ]
+ ],
+ "clinic-nurse": [
+  [
+   "The chart says 'allergic to everything'. Which medicine do you give?",
+   "A sugar tablet, with the leaflet read out loud.",
+   [
+    "The strongest one in the cupboard",
+    "Whichever one the patient asks for, loudly"
+   ]
+  ]
+ ],
+ "clinic-pharmacy": [
+  [
+   "The leaflet is in a language nobody reads. The bottle is clearly labelled. Which do you follow?",
+   "The bottle, and you ask the patient to read the leaflet back.",
+   [
+    "The leaflet, because it is longer",
+    "Neither, the bottle is probably from the bus"
+   ]
+  ]
+ ],
+ "fire-hose": [
+  [
+   "The bakery fire is out, but the hose is still running. Your next step?",
+   "Turn off the hose and offer the bakery a bun.",
+   [
+    "Aim the hose at the library, just in case",
+    "Leave it running, the bakery likes the water"
+   ]
+  ]
+ ],
+ "fire-dispatch": [
+  [
+   "The caller says the fire is 'behind you'. You turn round and see…",
+   "Nothing. Log the call as 'a fire behind you, nothing there'.",
+   [
+    "A fire, which you put out with the phone",
+    "The caller, who is also behind you"
+   ]
+  ]
+ ],
+ "post-parcel": [
+  [
+   "The parcel's address is a postcode made of letters only. Where does it go?",
+   "Back to the sender, who is also a postcode.",
+   [
+    "Into the bin marked 'elsewhere'",
+    "To FIA, which accepts everything"
+   ]
+  ]
+ ],
+ "post-stamp": [
+  [
+   "Two stamps are stuck together. The postage is paid twice. You…",
+   "Cancel one stamp and send the parcel with the other.",
+   [
+    "Charge the sender twice, for fairness",
+    "Post the two stamps as one letter, which is cheating"
+   ]
+  ]
+ ],
+ "bakery-assistant": [
+  [
+   "A customer asks for 'the cake with no name'. Which do you sell?",
+   "The one with no name, and an apology.",
+   [
+    "The one with the name crossed out",
+    "Whichever is least stale"
+   ]
+  ]
+ ],
+ "bakery-till": [
+  [
+   "The customer has 1 CCT, wants a 1 CCT bun, and wants change. Your answer?",
+   "The bun, and a smile. The change is the smile.",
+   [
+    "Four buns, for the change",
+    "The bun, and the till's own coins, which are peanuts"
+   ]
+  ]
+ ],
+ "library-shelf": [
+  [
+   "A book says 'please be quiet' in capital letters. You…",
+   "Shelve it quietly, and apologise to the shelf.",
+   [
+    "Read it aloud, to be helpful",
+    "Put it on the wrong shelf, for variety"
+   ]
+  ]
+ ],
+ "library-returns": [
+  [
+   "A book is returned five years late with a note: 'sorry, the dog ate it'. The fine is…",
+   "Half a peanut, and a library card for the dog.",
+   [
+    "The full price of the dog",
+    "Nothing, the dog ate the fine"
+   ]
+  ]
+ ],
+ "cinema-usher": [
+  [
+   "A customer asks for a refund because the film ends in the middle. You…",
+   "Explain that the middle is the ending, for now.",
+   [
+    "Give them the middle of their ticket",
+    "Show the film again from the start, as a refund"
+   ]
+  ]
+ ],
+ "cinema-projector": [
+  [
+   "The film has reached the end, but the reels say 'Part 1 of 3'. You…",
+   "Rewind to Part 1, and tell the audience it gets better.",
+   [
+    "Show Part 3 and hope for the best",
+    "Play the reels in any order, which is art"
+   ]
+  ]
+ ],
+ "power-switch": [
+  [
+   "A switch says 'do not touch', and it is the only switch. You…",
+   "Touch it gently, and write 'touched gently' on the label.",
+   [
+    "Leave it alone and hope FIA notices",
+    "Hit it, which is what the label is for"
+   ]
+  ]
+ ],
+ "power-meter": [
+  [
+   "The meter reads 'enough', and the town needs more. You…",
+   "Ask the meter what it means by 'enough', and wait politely.",
+   [
+    "Turn the meter up to 'lots'",
+    "Read the meter with your eyes closed"
+   ]
+  ]
+ ],
+ "radio-dial": [
+  [
+   "The dial is stuck, and the stuck song is now the only song in town. You tell listeners…",
+   "It's the best song in town, and it's on repeat, on purpose.",
+   [
+    "Sorry, then play it backwards",
+    "The radio is in the cells"
+   ]
+  ]
+ ],
+ "radio-playlist": [
+  [
+   "A listener asks for a song that was never on the list. You…",
+   "Add it to the list, and say it was always there.",
+   [
+    "Say 'it's not on the list' and hang up",
+    "Play the list in alphabetical order of the listener"
+   ]
+  ]
+ ],
+ "food-waiter": [
+  [
+   "A customer orders 'the usual', which is peanuts in a different hat. You bring…",
+   "The peanuts, in a hat, and ask how they liked the last one.",
+   [
+    "A plate with no peanuts, as a surprise",
+    "The hat, which the customer already has"
+   ]
+  ]
+ ],
+ "food-dish": [
+  [
+   "The recipe says 'add peanuts until it is right'. The dish is already right. You…",
+   "Stop adding peanuts, and taste it again.",
+   [
+    "Keep adding until the peanuts are right",
+    "Add a hat, for presentation"
+   ]
+  ]
+ ],
+ "harbour-crane": [
+  [
+   "A box marked 'do not lift' is lifted. You…",
+   "Put it back on the dock, labelled 'lifted, with permission'.",
+   [
+    "Drop it in the sea, which has none",
+    "Keep it on the crane, which is the only thing that can hold it"
+   ]
+  ]
+ ],
+ "harbour-dock": [
+  [
+   "The ship has docked, but the harbour has no sea. The sailors ask where the water is. You say…",
+   "It is across the road, in the bakery.",
+   [
+    "Check the fire station, they have a hose",
+    "There is no water, but there is a very good cafe"
+   ]
+  ]
+ ],
+ "tax-clerk": [
+  [
+   "A citizen pays their tax in buns. The tax office takes…",
+   "The buns, weighed carefully, and a receipt in bun form.",
+   [
+    "Nothing, buns are not money",
+    "The citizen, as a fine"
+   ]
+  ]
+ ],
+ "tax-audit": [
+  [
+   "The missing 3 CCT was in a bun. Who ate the bun?",
+   "The auditor, who is an honest bun.",
+   [
+    "The citizen, who is a bun",
+    "Nobody, buns cannot eat"
+   ]
+  ],
+  [
+   "The books balance, but the buns do not. You…",
+   "Audit the buns, and report them as a separate department.",
+   [
+    "Balance the books with more buns",
+    "Report the buns to the police"
+   ]
+  ]
+ ],
+ "car-attendant": [
+  [
+   "A car is in the bus lane, and its driver says it is a bus. You…",
+   "Ask to see the bus's ticket, then issue the car one.",
+   [
+    "Let the car drive on, buses are optional",
+    "Tow the bus"
+   ]
+  ]
+ ],
+ "car-ticket": [
+  [
+   "The machine takes no coins, but takes buns. Where does the bun go?",
+   "In the slot, and the ticket goes to the bun.",
+   [
+    "In your mouth, the bun was for you",
+    "In the bin marked 'coins'"
+   ]
+  ]
+ ],
+ "gym-instructor": [
+  [
+   "A member asks how long to rest between sets. You say…",
+   "Rest until you feel brave, then one more.",
+   [
+    "Rest for a week, then start again",
+    "Don't rest, the towel needs the bench"
+   ]
+  ]
+ ],
+ "gym-towel": [
+  [
+   "The towel was found in the sauna, which is now also a towel. Lost property says…",
+   "It has been claimed by the sauna. Please see the sauna.",
+   [
+    "It's yours, if you can carry it",
+    "It's lost, which is what we do"
+   ]
+  ]
+ ],
+ "museum-guide": [
+  [
+   "A visitor asks to touch the peanut under glass. You say…",
+   "Only through the glass, which is the peanut's privacy.",
+   [
+    "Yes, it is very valuable and very warm",
+    "Yes, but please don't tell the peanut"
+   ]
+  ]
+ ],
+ "museum-cleaner": [
+  [
+   "The peanut has rolled under the case. You…",
+   "Ask the peanut to come out, politely, and wait.",
+   [
+    "Put a bigger case over the first case",
+    "Eat it, it is nearly a snack"
+   ]
+  ]
+ ],
+ "bus-driver": [
+  [
+   "A passenger says they are lost. Where do you take them?",
+   "To the bus stop, which is always where you start.",
+   [
+    "To the sea, as before",
+    "To the bakery, for buns"
+   ]
+  ]
+ ],
+ "bus-timetable": [
+  [
+   "The timetable says the next bus is 'soon', and the bus is due at 'soon minus one'. You…",
+   "Explain that soon is a time too, and print it in bold.",
+   [
+    "Print 'sooner'",
+    "Remove the timetable, which will be soon"
+   ]
+  ]
+ ],
+ "laundry-attendant": [
+  [
+   "The machine is on fire. Which button do you press?",
+   "The one that says 'spin', which stops the fire, probably.",
+   [
+    "The one that says 'fire'",
+    "All of them, in order"
+   ]
+  ]
+ ],
+ "lifeguard": [
+  [
+   "The swimmer is now in the shallow end, and is still shouting. You…",
+   "Ask if they would like a ring, for their own peace of mind.",
+   [
+    "Throw them into the deep end",
+    "Blow the whistle, which is now the swimmer's fault"
+   ]
+  ]
+ ],
+ "stallholder": [
+  [
+   "A customer offers 1 CCT for a 'lamp of genuine value'. You…",
+   "Explain the lamp is 1 CCT, and the value is the lamp.",
+   [
+    "Sell it, and keep the coin for luck",
+    "Put the lamp in the bin marked 'genuine'"
+   ]
+  ]
+ ],
+ "police-patrol": [
+  [
+   "The offender says they were only clocking in for the tea. Do you…",
+   "Note the tea as an offence, and bring your own cup.",
+   [
+    "Arrest the tea",
+    "Let them off, the tea was in a hurry"
+   ]
+  ],
+  [
+   "A citizen asks you to prove you are a police officer. You show…",
+   "Your badge, which says 'police'.",
+   [
+    "A bun, which is the official sign",
+    "Your shift timetable, printed in bold"
+   ]
+  ]
+ ],
+ "police-desk": [
+  [
+   "The lawyer is on the way, and the suspect is on the way out. Where do you seat the suspect?",
+   "In the cells, which are waiting.",
+   [
+    "In the lobby, to make the lawyer comfortable",
+    "Next to the bun, for morale"
+   ]
+  ],
+  [
+   "The suspect asks what the charge is. The desk says…",
+   "'Clocking in twice, which is a crime, and very loudly.'",
+   [
+    "'Nothing, the charge is in the post'",
+    "'Buns'"
+   ]
+  ]
+ ]
+};
+
 function jobRow(jobId, onDone) {
   const j = JOBS[jobId];
   // One question for most jobs; two for the hard ones. Every question must be right before the shift is sent.
   const steps = [[j.prompt, j.right, j.wrong]];
   if (j.prompt2) steps.push([j.prompt2, j.right2, j.wrong2]);
+  // A hard job already has its second question in JOBS, so its first extra question is skipped: three questions in all.
+  const extra = EXTRA_STEPS[jobId] || [];
+  for (const x of (j.prompt2 ? extra.slice(1) : extra)) steps.push([x[0], x[1], x[2]]);
   const pick = el("div", { class: "city-quiz", hidden: true });
   const doneMsg = el("p", { class: "note" });
   const clockIn = async () => {
@@ -220,7 +657,7 @@ function jobRow(jobId, onDone) {
     pick.hidden = false;
     showStep(0);
   } }, "Clock in");
-  return el("div", {}, el("div", { class: "city-job" }, el("div", {}, el("strong", {}, j.title), el("p", { class: "note", style: "margin:2px 0 0" }, "Pays " + payOf(jobId) + " CCT" + (j.prompt2 ? " · two questions" : ""))), start), pick, doneMsg);
+  return el("div", {}, el("div", { class: "city-job" }, el("div", {}, el("strong", {}, j.title), el("p", { class: "note", style: "margin:2px 0 0" }, "Pays " + payOf(jobId) + " CCT" + (steps.length > 1 ? " · " + steps.length + " questions" : ""))), start), pick, doneMsg);
 }
 
 // Town Square poll: one vote each, results as counts. The owner or a Control Tower admin can start a new one.
