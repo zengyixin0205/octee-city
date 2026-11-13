@@ -219,7 +219,6 @@ function tarmacTex(len) {
     for (let i = 0; i < 900; i++) { g.fillStyle = r() < 0.5 ? "rgba(0,0,0,.14)" : "rgba(255,255,255,.06)"; g.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 2); }
     g.fillStyle = "#e9e2b5";
     for (let x = 0; x < w; x += 64) g.fillRect(x + 8, h / 2 - 2, 36, 4);
-    g.fillStyle = "#f4f1e6"; g.fillRect(0, 3, w, 3); g.fillRect(0, h - 6, w, 3);
   }, [len / 128, 1]);
 }
 // one straight road piece, with tiled pavements and tyre marks
@@ -636,6 +635,27 @@ for (const [x0, x1] of [[300, 430], [980, 1110]]) for (const z of [520, 546]) fo
   const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, 2), laneTyre);
   m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, 0.32, z + o); scene.add(m);
 }
+// Junction squares: fill the corners where two roads meet, so the joins are clean.
+const JUNCTIONS = [];
+for (const [x1, y1, x2, y2] of SEGS) JUNCTIONS.push([x1, y1], [x2, y2]);
+for (const [x, y] of JUNCTIONS) {
+  const sq = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, ROAD_W), mat("#4b4f55", { roughness: 0.95 }));
+  sq.rotation.x = -Math.PI / 2; sq.position.set(x, 0.27, y); sq.receiveShadow = true; scene.add(sq);
+}
+// Footpaths: from each building's door straight to the nearest road, where the straight line is clear.
+const ROAD_EDGES = [500, 570, 1002, 1034];
+for (const b of B) {
+  if (b.roof === "none" || b.id === "square" || b.id === "pool") continue;
+  const cx = b.x + b.w / 2, d = b.y + b.h + 4;
+  const above = ROAD_EDGES.filter((e) => e >= d), below = ROAD_EDGES.filter((e) => e <= d);
+  const t = above.length ? Math.min(...above) - 2 : Math.max(...below) + 2;
+  const lo = Math.min(d, t), hi = Math.max(d, t);
+  const blocked = SOLID.some((o) => o !== b && cx + 5 > o.x && cx - 5 < o.x + o.w && lo < o.y + o.h && hi > o.y);
+  if (blocked) continue;
+  const path = new THREE.Mesh(new THREE.PlaneGeometry(9, hi - lo), mat("#ffffff", { map: tileTex(1, (hi - lo) / 64) }));
+  path.rotation.x = -Math.PI / 2; path.position.set(cx, 0.3, (lo + hi) / 2); path.receiveShadow = true; scene.add(path);
+}
+
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
 function action() {
