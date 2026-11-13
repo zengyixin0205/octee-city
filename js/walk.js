@@ -38,15 +38,21 @@ const SOLID = [...B, FIA];
 
 // Extra roads, as segments [x1, y1, x2, y2]. A K joins the main street, and an F joins the south street.
 const ROAD_W = 22;
-const SEGS = [
-  [1200, 250, 1200, 504],   // K: spine, runs into the main street at its foot
-  [1200, 360, 1400, 236],   // K: upper arm, runs into the airport
-  [1200, 360, 1455, 458],   // K: lower arm, runs into the radio tower
-  [640, 1006, 640, 1140],   // F: spine, runs into the south street at its top
-  [640, 1060, 900, 1060],   // F: top bar, turns down into the laundrette
-  [900, 1000, 900, 1060],   // F: short stub, runs into the laundrette
-  [640, 1100, 1124, 1100],  // F: bottom bar, runs into the lounge
-];
+// Our own road layout: a roundabout north-east of the main street, with three roads leading off it.
+// The ring is made of short straight pieces, and the three roads are the south road to the main street,
+// the north road to the airport, and the west road to the power station.
+const RB = { x: 1290, y: 350, r: 80 };
+const SEGS = [];
+{
+  const N = 16;
+  for (let k = 0; k < N; k++) {
+    const a1 = (k / N) * Math.PI * 2, a2 = ((k + 1) / N) * Math.PI * 2;
+    SEGS.push([RB.x + RB.r * Math.cos(a1), RB.y + RB.r * Math.sin(a1), RB.x + RB.r * Math.cos(a2), RB.y + RB.r * Math.sin(a2)]);
+  }
+}
+SEGS.push([RB.x, RB.y + RB.r, RB.x, 504]);     // south road, runs into the main street
+SEGS.push([RB.x, RB.y - RB.r, RB.x, 236]);     // north road, runs into the airport
+SEGS.push([RB.x - RB.r, RB.y, 1125, RB.y]);    // west road, runs into the power station
 function segDist(px, py, [x1, y1, x2, y2]) {
   const dx = x2 - x1, dy = y2 - y1;
   const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
@@ -619,12 +625,6 @@ for (const [x1, y1, x2, y2] of SEGS) {
     addLamp(x1 + (x2 - x1) * t + nx * (ROAD_W / 2 + 8), y1 + (y2 - y1) * t + ny * (ROAD_W / 2 + 8));
   }
 }
-// A few parked cars: two on the K spine, one on the F top bar.
-for (const [x, z, rot] of [[1176, 300, 0], [1176, 330, 0], [760, 1047, Math.PI / 2]]) {
-  const c = makeCar(CAR_COLS[(x + z) % CAR_COLS.length]);
-  c.position.set(x, 0, z); c.rotation.y = rot;
-}
-
 // Main street: tiled pavements on both sides, and tyre marks in the lanes.
 for (const z of [493, 577]) {
   const pv = new THREE.Mesh(new THREE.PlaneGeometry(W, 14), mat("#ffffff", { map: tileTex(W / 64, 14 / 64) }));
