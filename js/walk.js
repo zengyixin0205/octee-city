@@ -39,14 +39,13 @@ const SOLID = [...B, FIA];
 // Extra roads, as segments [x1, y1, x2, y2]. A K joins the main street, and an F joins the south street.
 const ROAD_W = 22;
 const SEGS = [
-  [1200, 250, 1200, 504],   // K: spine, runs into the main street
+  [1200, 250, 1200, 504],   // K: spine, runs into the main street at its foot
   [1200, 360, 1400, 236],   // K: upper arm, runs into the airport
-  [1200, 360, 1400, 470],   // K: lower arm
-  [1400, 466, 1400, 504],   // K: lower arm stub, runs into the main street
-  [640, 1006, 640, 1140],   // F: spine, runs into the south street
-  [640, 1060, 930, 1060],   // F: top bar
-  [930, 996, 930, 1060],    // F: stub, runs into the laundrette
-  [640, 1100, 1124, 1100],  // F: middle bar, runs into the lounge
+  [1200, 360, 1455, 458],   // K: lower arm, runs into the radio tower
+  [640, 1006, 640, 1140],   // F: spine, runs into the south street at its top
+  [640, 1060, 900, 1060],   // F: top bar, turns down into the laundrette
+  [900, 1000, 900, 1060],   // F: short stub, runs into the laundrette
+  [640, 1100, 1124, 1100],  // F: bottom bar, runs into the lounge
 ];
 function segDist(px, py, [x1, y1, x2, y2]) {
   const dx = x2 - x1, dy = y2 - y1;
