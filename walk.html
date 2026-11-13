@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walk around Octee City</title>
+<meta name="description" content="Walk around Octee City with WASD. Go into the bank, the police station, the games and everything else.">
+<link rel="icon" href="https://zengyixin0205.github.io/Octee-airline/assets/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://zengyixin0205.github.io/Octee-airline/css/styles.css">
+<style>
+.walk-top{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line,#ddd)}
+.walk-wrap{max-width:980px;margin:12px auto;padding:0 12px}
+#walk{width:100%;height:auto;display:block;border:2px solid #333;border-radius:10px;background:#9ccf8a;touch-action:none}
+.walk-help{color:var(--muted,#555);font-size:.95em;margin:8px 0}
+.walk-key{display:inline-block;border:1px solid #888;border-bottom-width:3px;border-radius:5px;padding:0 6px;font-family:monospace;background:#fff;color:#222}
+</style>
+</head>
+<body>
+<header class="walk-top">
+  <strong><a href="index.html" style="text-decoration:none">Octee City</a> · walking</strong>
+  <nav style="display:flex;gap:12px;flex-wrap:wrap"><a href="index.html">The town (menu)</a><a href="https://zengyixin0205.github.io/Octee-airline/">Octee Airlines</a></nav>
+</header>
+<main class="walk-wrap">
+  <canvas id="walk" width="960" height="540" aria-label="Map of Octee City. Use W A S D to walk, E to go into a building."></canvas>
+  <p class="walk-help"><span class="walk-key">W</span><span class="walk-key">A</span><span class="walk-key">S</span><span class="walk-key">D</span> or the arrow keys to walk. Walk up to a door and press <span class="walk-key">E</span> to go in. On a phone, use the buttons under the map.</p>
+  <div id="walk-buttons" style="display:grid;grid-template-columns:repeat(3,64px);gap:6px;justify-content:center;margin:8px 0">
+    <span></span><button class="btn ghost" type="button" data-k="up">▲</button><span></span>
+    <button class="btn ghost" type="button" data-k="left">◀</button><button class="btn ghost" type="button" data-k="down">▼</button><button class="btn ghost" type="button" data-k="right">▶</button>
+  </div>
+  <p class="walk-help" style="text-align:center"><button class="btn" type="button" data-k="enter">Enter</button></p>
+  <p class="walk-help">Nothing here is to scale. The bank is not a real bank, and the police are not real police.</p>
+</main>
+<script type="module" src="js/walk.js"></script>
+</body>
+</html>
