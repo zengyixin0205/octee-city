@@ -32,6 +32,7 @@ const BUILDINGS = [
   { id: "lost", name: "Lost Property Office", blurb: "Lost your fine? Come and claim half of it back. The form is very long, and the pen is on a string." },
   { id: "laundry", name: "Laundrette", blurb: "Everything comes out cleaner, except the socks, which were never in." },
   { id: "pool", name: "Swimming Pool", blurb: "Thirty metres long, one metre deep, and the lifeguard has a very serious whistle." },
+  { id: "lounge", name: "Platinum Lounge", blurb: "Members only, which means everyone who has more money than is sensible. The chairs are very comfortable." },
   { id: "market", name: "Night Market", blurb: "Stalls selling things you did not know you needed, at prices you will not believe." }
 ];
 const JOBS = {
@@ -426,6 +427,20 @@ function poolGame(done, opt = {}) {
   return el("div", {}, track, el("div", { class: "city-row" }, dive), msg);
 }
 
+// The Platinum Lounge: the public guest list of citizens at Platinum level, as of their last visit.
+function loungeBlock() {
+  const box = el("div", {}, el("p", { class: "note" }, "Checking the guest list…"));
+  pub("/api/city/platinum").then((j) => {
+    box.replaceChildren(
+      el("p", {}, `Platinum starts at ${(j ? j.min : 50000).toLocaleString("en-GB")} CCT in the OCT Bank, and pays ${j ? (j.rate * 100).toFixed(1) : "5.0"}% a year, every day.`),
+      !j ? el("p", { class: "note" }, "The guest list is in the cells. Try again later.")
+        : j.members.length ? table(["Citizen", "Bank at last visit"], j.members.map((m) => [m.name, fmtBank(m.bank)]))
+        : el("p", { class: "note" }, "Nobody is in the lounge yet. The chairs are very comfortable.")
+    );
+  });
+  return box;
+}
+
 function buildingView(id, app) {
   const b = BUILDINGS.find((x) => x.id === id);
   const jobsHere = Object.entries(JOBS).filter(([, j]) => j.b === id).map(([k]) => k);
@@ -442,6 +457,7 @@ function buildingView(id, app) {
     el("div", { id: "city-wanted" }, el("p", { class: "note" }, "Checking the files…")));
   if (id === "police") card.append(el("p", {}, el("a", { href: "#report" }, "Read the police report"), " · the last 30 fines and arrests, on the record."));
   if (id === "lost") card.append(claimsBlock(app));
+  if (id === "lounge") card.append(loungeBlock());
   if (id === "market") card.append(playArea("market", "Spot the genuine", "Five stalls. Pick the genuine item at each one. One point per right answer, up to 5 CCT a day.", marketGame));
   if (id === "laundry") card.append(playArea("laundry", "Sock pairs", "Turn the socks over and find the pairs before the machine finishes. Up to 6 CCT a day.", laundryGame));
   if (id === "pool") card.append(
