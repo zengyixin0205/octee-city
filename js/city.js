@@ -164,7 +164,8 @@ async function loadPanels(app) {
 }
 
 function hub() {
-  return [el("h2", {}, "The town"), el("p", { class: "note" }, "Click a building on the map, or in the list below. You can look at all of them for free."),
+  return [el("p", {}, el("a", { href: "walk.html", style: "display:inline-block;padding:14px 22px;font-size:1.3rem;font-weight:bold;background:#1e63c8;color:#fff;border-radius:10px;text-decoration:none" }, "Walk around the town in 3D (WASD)")),
+    el("h2", {}, "The town"), el("p", { class: "note" }, "Click a building on the map, or in the list below. You can look at all of them for free."),
     cityMap(),
     el("h2", {}, "The buildings"),
     el("div", { class: "city-grid" }, BUILDINGS.map((b) => el("a", { class: "city-card", href: "#" + b.id }, el("h3", {}, b.name), el("p", { class: "note", style: "margin:0" }, b.blurb), el("p", { class: "note", style: "margin:4px 0 0" }, sharesSold(b.id) ? "Owners: " + ownersText(b.id) + " · " + (SHARES - sharesSold(b.id)) + " shares for sale" : "All " + SHARES + " shares for sale · " + priceOf(b.id) / SHARES + " CCT each")))),
