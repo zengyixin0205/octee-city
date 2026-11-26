@@ -3,7 +3,7 @@
 // two doors on the kerb side and an air-conditioning pod on the roof), arrival times (B) and a route map (K).
 // Nothing here is a real bus company: the colours are just colours.
 export function createBus(ctx) {
-  const { THREE, scene, mat, label, PLAYER, stage, W, H, RB, SOLID, makeFigure, routePos, ringS, ringLane, LOOP, cars, jm, setMsg } = ctx;
+  const { THREE, scene, mat, label, PLAYER, stage, W, H, RB, SOLID, HWY, HWY_H, RAMPS, makeFigure, routePos, ringS, ringLane, LOOP, cars, jm, setMsg } = ctx;
 
   // ---- the road lanes the routes use (left-hand traffic: keep left) ----
   const LAN_E = 522, LAN_W = 548;          // main street, eastbound (north lane) and westbound (south lane)
@@ -35,6 +35,11 @@ const named = (l, name) => Object.assign(l, { name });
       legs: [...HEAD, leg(30, [LK_N, 548], [SIDE_S, 548]), leg(16, [SIDE_S, 548], [SIDE_S, SO_W]), leg(18, [SIDE_S, SO_W], [9, SO_W]), leg(14, [9, SO_W], [9, LAN_E]), leg(30, [9, LAN_E], [LK_S, LAN_E])] }
   ];
 
+  // ---- the highway express buses: they stay on the highway and stop only at the four ramps ----
+  const hwLane = (off, rev) => { const P = HWY, out = P.map((q, i) => { const a = P[(i - 1 + P.length) % P.length], b = P[(i + 1) % P.length]; let dx = b[0] - a[0], dz = b[1] - a[1]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; return [q[0] + dz * off, q[1] - dx * off]; }); return rev ? out.reverse() : out; };
+  ROUTES.push({ no: "506", name: "Highway Express (clockwise)", col: "#c2185b", col2: "#6d0f35", hw: true, elev: HWY_H, vmax: 150, n: 3, legs: [], poly: hwLane(11, false), dir: 1 });
+  ROUTES.push({ no: "518", name: "Highway Express (anticlockwise)", col: "#455a64", col2: "#222f35", hw: true, elev: HWY_H, vmax: 150, n: 3, legs: [], poly: hwLane(-11, true), dir: -1 });
+
   // ---- smooth the corners of a closed route ----
   function roundPoly(P, r) {
     const n = P.length, out = [];
@@ -64,16 +69,29 @@ const named = (l, name) => Object.assign(l, { name });
   const stops = [];
   const names = new Map();
   const buildingName = (x, y) => { let best = null, bd = 1e12; for (const s of SOLID) { const d = Math.hypot(x - (s.x + s.w / 2), y - (s.y + s.h / 2)) - Math.max(s.w, s.h) / 2; if (d < bd) { bd = d; best = s; } } return best ? best.name : "Octee City"; };
-  function stopAt(x, y, hx, hy, kerb, fixedName) {
+  function stopAt(x, y, hx, hy, kerb, fixedName, elev = 0) {
     for (const s of stops) if (!fixedName && Math.hypot(s.lx - x, s.ly - y) < 50 && s.hx * hx + s.hy * hy > 0.5) return s;
     const px = x + hy * kerb, py = y - hx * kerb;           // to the left of the lane
     let name = fixedName;
     if (!name) { const base = buildingName(px, py), k = names.get(base) || 0; names.set(base, k + 1); name = k === 0 ? base : k === 1 ? "Opp " + base : `${base} ${k}`; }
     const code = String(10000 + ((stops.length * 7919 + 1301) % 89999)).padStart(5, "0");
-    const st = { x: px, y: py, lx: x, ly: y, hx, hy, name, code, routes: [] };
+    const st = { x: px, y: py, lx: x, ly: y, hx, hy, name, code, routes: [], elev };
     stops.push(st); return st;
   }
   for (const r of ROUTES) {
+    if (r.hw) {                                   // express: smooth already, a stop at each ramp
+      r.route = ctx.makeRoute(r.poly); r.stops = [];
+      for (const rp of RAMPS) {
+        let bi = 0, bd = 1e12; HWY.forEach((q, i) => { const d = (q[0] - rp.x1) ** 2 + (q[1] - rp.y1) ** 2; if (d < bd) { bd = d; bi = i; } });
+        const i = (bi + r.dir * 5 + HWY.length * 2) % HWY.length, j = (i + 1) % HWY.length, k = (i - 1 + HWY.length) % HWY.length;
+        let hx = HWY[j][0] - HWY[k][0], hy = HWY[j][1] - HWY[k][1]; const hl = Math.hypot(hx, hy) || 1; hx = (hx / hl) * r.dir; hy = (hy / hl) * r.dir;
+        const lane = r.dir > 0 ? r.poly[i] : r.poly[HWY.length - 1 - i];
+        const st = stopAt(lane[0], lane[1], hx, hy, 11, "Highway, " + rp.name, HWY_H);
+        st.routes.push(r); r.stops.push({ stop: st, s: nearest(r.poly, st.lx, st.ly) });
+      }
+      r.stops.sort((a, b) => a.s - b.s);
+      continue;
+    }
     const raw = [].concat(...r.legs.map((l) => l.pts));
     r.poly = roundPoly(raw, 22);
     r.route = ctx.makeRoute(r.poly);
@@ -103,7 +121,7 @@ const named = (l, name) => Object.assign(l, { name });
   const signMat = (txt) => { const m = label(txt, { size: 30, bg: "rgba(20,60,150,.96)", fg: "#fff" }); return m; };
   for (const [i, st] of stops.entries()) {
     const g = new THREE.Group();
-    g.position.set(st.x, 0, st.y); g.rotation.y = Math.atan2(st.hx, st.hy);
+    g.position.set(st.x, st.elev || 0, st.y); g.rotation.y = Math.atan2(st.hx, st.hy);
     const roof = new THREE.Mesh(new THREE.BoxGeometry(8, 1.6, 26), mat(st.bay ? "#c62828" : "#2b4b8a")); roof.position.set(4, 24, -2); roof.castShadow = true; g.add(roof);
     const back = new THREE.Mesh(new THREE.BoxGeometry(0.8, 18, 24), mat("#a9d4ee", { transparent: true, opacity: 0.55 })); back.position.set(8, 14, -2); g.add(back);
     for (const z of [-13, 9]) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.4, 24, 1.4), mat("#444")); p.position.set(0.5, 12, z); g.add(p); }
@@ -113,7 +131,7 @@ const named = (l, name) => Object.assign(l, { name });
     const lbl = label(st.name, { size: 28, bg: "rgba(255,255,255,.96)" }); lbl.scale.multiplyScalar(0.28); lbl.position.set(2, 33, 2); g.add(lbl);
     scene.add(g);
     st.g = g;
-    if (i % 3 === 0 && !st.bay) { const f = makeFigure(["#e4572e", "#17bebb", "#ffc914", "#76b041"][i % 4]); const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); f.position.set(st.x + (5 * c + 2 * s), 0, st.y + (-5 * s + 2 * c)); f.rotation.y = g.rotation.y - Math.PI / 2; }
+    if (i % 3 === 0 && !st.bay && !st.elev) { const f = makeFigure(["#e4572e", "#17bebb", "#ffc914", "#76b041"][i % 4]); const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); f.position.set(st.x + (5 * c + 2 * s), 0, st.y + (-5 * s + 2 * c)); f.rotation.y = g.rotation.y - Math.PI / 2; }
   }
 
   // ---- the bus: a single-decker, low floor, two doors on the left (kerb) side ----
@@ -142,14 +160,14 @@ const named = (l, name) => Object.assign(l, { name });
   const buses = [];
   for (const r of ROUTES) for (let i = 0; i < r.n; i++) {
     const s0 = (i / r.n) * r.route.L + (ROUTES.indexOf(r) * 97) % 200;
-    const b = { r, route: r.route, g: buildBus(r), s: s0, v: 0, vmax: 62, hd: 0, state: "go", t: 0, si: 0 };
+    const b = { r, route: r.route, g: buildBus(r), s: s0, v: 0, vmax: r.vmax || 62, hd: 0, state: "go", t: 0, si: 0 };
     let bi = 0, bd = 1e12; r.stops.forEach((q, k) => { const d = (q.s - s0 + r.route.L) % r.route.L; if (d < bd) { bd = d; bi = k; } }); b.si = bi;
     buses.push(b);
   }
 
   // ---- driving ----
   function update(dt) {
-    const pts = [...cars.map((o) => ({ x: o.g.position.x, y: o.g.position.z, o })), { x: jm.position.x, y: jm.position.z }, ...(PLAYER.riding || S.ride ? [] : [{ x: PLAYER.x, y: PLAYER.y }])];
+    const pts = [...cars.map((o) => ({ x: o.g.position.x, y: o.g.position.z, e: o.elev || 0, o })), { x: jm.position.x, y: jm.position.z, e: 0 }, ...(PLAYER.riding || S.ride ? [] : [{ x: PLAYER.x, y: PLAYER.y, e: PLAYER.gy }])];
     for (const b of buses) {
       const r = b.r, L = r.route.L, st = r.stops[b.si], p = routePos(r.route, b.s), q = routePos(r.route, b.s + 40);
       let d = (st.s - b.s + L) % L; if (d > L - 4) d = 0;
@@ -160,8 +178,8 @@ const named = (l, name) => Object.assign(l, { name });
         const bend = Math.abs(Math.atan2(p.hx * q.hy - p.hy * q.hx, p.hx * q.hx + p.hy * q.hy));
         if (bend > 0.5) target = Math.min(target, 22);
         let gap = Infinity;
-        for (const o of pts) { if (o.o && o.o.g === b.g) continue; const px = o.x - p.x, pz = o.y - p.y, ahead = px * p.hx + pz * p.hy, side = Math.abs(-px * p.hy + pz * p.hx); if (ahead > 0 && ahead < 90 && side < 14) gap = Math.min(gap, ahead); }
-        for (const o of buses) { if (o === b) continue; const px = o.g.position.x - p.x, pz = o.g.position.z - p.y, ahead = px * p.hx + pz * p.hy, side = Math.abs(-px * p.hy + pz * p.hx); if (ahead > 0 && ahead < 90 && side < 14) gap = Math.min(gap, ahead); }
+        for (const o of pts) { if (o.o && o.o.g === b.g) continue; if (Math.abs((o.e || 0) - (r.elev || 0)) > 14) continue; const px = o.x - p.x, pz = o.y - p.y, ahead = px * p.hx + pz * p.hy, side = Math.abs(-px * p.hy + pz * p.hx); if (ahead > 0 && ahead < 90 && side < 14) gap = Math.min(gap, ahead); }
+        for (const o of buses) { if (o === b || Math.abs((o.r.elev || 0) - (r.elev || 0)) > 14) continue; const px = o.g.position.x - p.x, pz = o.g.position.z - p.y, ahead = px * p.hx + pz * p.hy, side = Math.abs(-px * p.hy + pz * p.hx); if (ahead > 0 && ahead < 90 && side < 14) gap = Math.min(gap, ahead); }
         if (gap < 44) target = 0; else if (gap < 90) target = Math.min(target, (b.vmax * (gap - 44)) / 46);
         b.v += (target - b.v) * Math.min(1, dt * (target < b.v ? 4.5 : 1.2));
         b.s += b.v * dt;
@@ -169,10 +187,10 @@ const named = (l, name) => Object.assign(l, { name });
         if ((d2 < 3 || d2 > L - 4) && b.v < 14 && !(b.leftAt != null && Math.abs(b.s - b.leftAt) < 20)) { b.state = "dwell"; b.t = 7 + (b.si % 3) * 1.5; b.v = 0; b.s = st.s; }
       }
       const np = routePos(r.route, b.s);
-      b.g.position.set(np.x, 0, np.y);
+      b.g.position.set(np.x, r.elev || 0, np.y);
       const want = Math.atan2(np.hx, np.hy); let dd = want - b.hd; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); b.hd += dd * Math.min(1, dt * 5); b.g.rotation.y = b.hd;
     }
-    if (S.ride) { S.ride.g.updateMatrixWorld(); PLAYER.x = S.ride.g.position.x; PLAYER.y = S.ride.g.position.z; }
+    if (S.ride) { PLAYER.x = S.ride.g.position.x; PLAYER.y = S.ride.g.position.z; PLAYER.gy = S.ride.r.elev || 0; PLAYER.hop = 0; PLAYER.vh = 0; }
   }
 
   // ---- timings ----
@@ -186,7 +204,7 @@ const named = (l, name) => Object.assign(l, { name });
     return dist / 34 + between * 7.5;
   }
   const fmt = (t) => (t < 12 ? "Arr" : t < 60 ? "<1 min" : Math.round(t / 60) + " min");
-  function stopNear(maxD = 62) { let best = null, bd = maxD; for (const s of stops) { const d = Math.hypot(PLAYER.x - s.x, PLAYER.y - s.y); if (d < bd) { bd = d; best = s; } } return best; }
+  function stopNear(maxD = 62) { let best = null, bd = maxD; for (const s of stops) { if (Math.abs(PLAYER.gy - (s.elev || 0)) > 22) continue; const d = Math.hypot(PLAYER.x - s.x, PLAYER.y - s.y); if (d < bd) { bd = d; best = s; } } return best; }
 
   // ---- panels ----
   const panel = document.createElement("div");
@@ -225,7 +243,7 @@ const named = (l, name) => Object.assign(l, { name });
     for (const r of ROUTES) {
       const names = r.stops.filter((q) => !q.stop.bay).map((q) => q.stop.name);
       const d = mk("details", { style: "margin:5px 0" });
-      d.append(mk("summary", { textContent: `${r.no}  ${r.name}  (${names.length + 1} stops)`, style: `cursor:pointer;font-weight:700;border-left:8px solid ${r.col};padding-left:6px` }), mk("div", { textContent: "Terminal Bay " + (r.bay + 1) + " → " + names.join(" → ") + " → back to the terminal", style: "font-size:12.5px;color:#444;margin:4px 0 4px 14px" }));
+      d.append(mk("summary", { textContent: `${r.no}  ${r.name}  (${r.hw ? names.length : names.length + 1} stops)`, style: `cursor:pointer;font-weight:700;border-left:8px solid ${r.col};padding-left:6px` }), mk("div", { textContent: (r.hw ? "Express on the highway, stopping only at the ramps: " + names.join(" → ") : "Terminal Bay " + (r.bay + 1) + " → " + names.join(" → ") + " → back to the terminal"), style: "font-size:12.5px;color:#444;margin:4px 0 4px 14px" }));
       kids.push(d);
     }
     kids.push(mk("p", { textContent: "Press K or Esc to close. Press B at a stop for arrival times.", style: "margin:8px 0 0;color:#666;font-size:12px" }));
@@ -244,7 +262,7 @@ const named = (l, name) => Object.assign(l, { name });
     const b = S.ride; if (!b) return false;
     if (b.state !== "dwell") { setMsg("Wait until the bus has stopped."); return true; }
     const st = r2stop(b); S.ride = null;
-    PLAYER.x = st.x + st.hy * 14; PLAYER.y = st.y - st.hx * 14;
+    PLAYER.x = st.x + st.hy * 4; PLAYER.y = st.y - st.hx * 4; PLAYER.gy = st.elev || 0;
     setMsg("You got off at " + st.name + ".");
     return true;
   }

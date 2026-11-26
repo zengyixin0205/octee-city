@@ -1,7 +1,7 @@
 // The big outdoors: the hiking trail up the biggest mountain (steps, lights, logs to jump over, a summit), and the highway
 // that goes all the way round the town on pillars, with cars on it and arched bridges where it crosses the rivers.
 export function createWorld(ctx) {
-  const { THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H } = ctx;
+  const { THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H } = ctx;
 
   // ---- the hiking trail ----
   {
@@ -53,7 +53,11 @@ export function createWorld(ctx) {
       // a low wall along each side
       const wallPts = up(HWY, 24.5 * sg), pos = [], idx = [];
       wallPts.forEach((q, i) => { pos.push(q[0], HWY_H - 7, q[1], q[0], HWY_H + 6, q[1]); });
-      for (let i = 0; i < wallPts.length; i++) { const j = (i + 1) % wallPts.length; idx.push(i * 2, j * 2, i * 2 + 1, i * 2 + 1, j * 2, j * 2 + 1); }
+      for (let i = 0; i < wallPts.length; i++) {
+        const j = (i + 1) % wallPts.length, mx = (wallPts[i][0] + wallPts[j][0]) / 2, mz = (wallPts[i][1] + wallPts[j][1]) / 2;
+        if (RAMPS.some((r) => Math.hypot(mx - r.x1, mz - r.y1) < 34)) continue;       // a gap in the wall where a ramp joins
+        idx.push(i * 2, j * 2, i * 2 + 1, i * 2 + 1, j * 2, j * 2 + 1);
+      }
       const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
       const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: "#b9b4a6", roughness: 0.9, side: THREE.DoubleSide })); m.castShadow = true; scene.add(m);
     }
@@ -80,6 +84,28 @@ export function createWorld(ctx) {
       if (i % 4 === 3) g.scale.set(1.15, 1.6, 2.1);                             // a lorry
       cars.push({ g, route, s: (i / n) * route.L, v: 0, vmax: vmax * (0.9 + (i % 3) * 0.06), hd: 0, elev: HWY_H + 0.2, hw: true });
     }
+    // the ramps: a slope up from the ring road to the highway, with walls on both sides and a sign at the bottom
+    for (const r of RAMPS) {
+      const P = r.pts, pos = [], idx = [], wpos = [], widx = [];
+      P.forEach((q, i) => {
+        const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)]; let dx = b.x - a.x, dz = b.y - a.y; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+        const nx = dz, nz = -dx, y = q.h + 1.5;
+        pos.push(q.x + nx * 20, y, q.y + nz * 20, q.x - nx * 20, y, q.y - nz * 20);
+        for (const sg of [1, -1]) wpos.push(q.x + nx * 21 * sg, y + 4, q.y + nz * 21 * sg, q.x + nx * 21 * sg, 0, q.y + nz * 21 * sg);
+      });
+      for (let i = 0; i + 1 < P.length; i++) { idx.push(i * 2, (i + 1) * 2, i * 2 + 1, i * 2 + 1, (i + 1) * 2, (i + 1) * 2 + 1); }
+      const n = P.length;
+      for (let side = 0; side < 2; side++) for (let i = 0; i + 1 < n; i++) { const a = (side * n + i) * 2, b = (side * n + i + 1) * 2; widx.push(a, b, a + 1, a + 1, b, b + 1); }
+      const nor = []; for (let i = 0; i < pos.length / 3; i++) nor.push(0, 1, 0);
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); g.setIndex(idx);
+      const road = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: "#3f4348", roughness: 0.95, side: THREE.DoubleSide })); road.receiveShadow = true; scene.add(road);
+      const wg = new THREE.BufferGeometry(); wg.setAttribute("position", new THREE.Float32BufferAttribute(wpos, 3)); wg.setIndex(widx); wg.computeVertexNormals();
+      const walls = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({ color: "#b9b4a6", roughness: 0.9, side: THREE.DoubleSide })); walls.castShadow = true; scene.add(walls);
+      for (let i = 2; i < P.length - 2; i += 3) { const q = P[i], hz = r.y1 === r.y0 ? 1 : 0; const d = new THREE.Mesh(new THREE.BoxGeometry(hz ? 9 : 1.6, 0.3, hz ? 1.6 : 9), mat("#e9e2b5")); d.position.set(q.x, q.h + 1.75, q.y); scene.add(d); }
+      const lbl = label("Up to the highway", { size: 36 }); lbl.position.set(r.x0 + (r.x1 - r.x0) * 0.06, 34, r.y0 + (r.y1 - r.y0) * 0.06); scene.add(lbl);
+      for (let k = 0; k < 4; k++) { const t = P[Math.floor(4 + k * 9)], dx = r.x1 - r.x0, dz = r.y1 - r.y0, l = Math.hypot(dx, dz); addLamp(t.x + (dz / l) * 24, t.y - (dx / l) * 24, t.h + 1.5); }
+    }
+
     // bridges: where the highway crosses a river, two arches over the deck and piers in the water
     for (const [river, name] of [[RIVER_N, "Octee Bridge"], [RIVER_S, "South Bridge"]]) {
       const ys = river.find((q, i) => i && ((river[i - 1][1] <= (river === RIVER_N ? -300 : H + 300)) !== (q[1] <= (river === RIVER_N ? -300 : H + 300))));

@@ -123,13 +123,36 @@ const TRAIL = (() => {
   return pts;
 })();
 const TRAIL_W = 13;                                // half the width of the path
-function trailAt(px, py) {
-  if (Math.hypot(px - HIKE.x, py - HIKE.y) > HIKE.r * 1.02) return null;
-  let bi = -1, bd = TRAIL_W * TRAIL_W;
-  for (let i = 0; i < TRAIL.length; i++) { const dx = px - TRAIL[i].x, dy = py - TRAIL[i].y, d = dx * dx + dy * dy; if (d < bd) { bd = d; bi = i; } }
-  return bi < 0 ? null : { i: bi, h: TRAIL[bi].h };
+// Ramps from the ring road up to the highway: a walkable (and drivable) slope, 40 units up over 270.
+const RAMPS = [
+  { x0: -6, y0: 1000, x1: -282, y1: 1000, name: "West Ramp" }, { x0: W + 6, y0: 700, x1: W + 282, y1: 700, name: "East Ramp" },
+  { x0: 2000, y0: -6, x1: 2000, y1: -282, name: "North Ramp" }, { x0: 1800, y0: H + 6, x1: 1800, y1: H + 282, name: "South Ramp" },
+].map((r) => {
+  const pts = [], N = 36;
+  for (let i = 0; i <= N; i++) { const t = i / N, e = t * t * (3 - 2 * t); pts.push({ x: r.x0 + (r.x1 - r.x0) * t, y: r.y0 + (r.y1 - r.y0) * t, h: (HWY_H - 1.5) * e }); }
+  return { ...r, pts };
+});
+// Everything you can walk on that is not the ground: the mountain trail, the ramps and the highway deck. Each sample has the height of its top.
+const WAYPTS = [];
+for (const t of TRAIL) WAYPTS.push({ x: t.x, y: t.y, h: t.h, half: TRAIL_W, k: "t" });
+for (const r of RAMPS) for (const q of r.pts) WAYPTS.push({ x: q.x, y: q.y, h: q.h, half: 19, k: "r" });
+for (let i = 0; i < HWY.length; i++) {
+  const a = HWY[i], b = HWY[(i + 1) % HWY.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(l / 8));
+  for (let k = 0; k < n; k++) WAYPTS.push({ x: a[0] + ((b[0] - a[0]) * k) / n, y: a[1] + ((b[1] - a[1]) * k) / n, h: HWY_H - 1.5, half: 20, k: "h" });
 }
-const groundAt = (px, py) => { const t = trailAt(px, py); return t ? t.h + 1.5 : 0; };
+function trailAt(px, py, gy = PLAYER.gy) {
+  const nearMtn = Math.hypot(px - HIKE.x, py - HIKE.y) <= HIKE.r * 1.02;
+  if (!nearMtn && px > 0 && px < W && py > 0 && py < H) return null;       // in the town you are on the ground
+  let best = null, bd = 1e12;
+  for (const p of WAYPTS) {
+    const dx = px - p.x, dy = py - p.y;
+    if (dx > 20 || dx < -20 || dy > 20 || dy < -20) continue;
+    const d = dx * dx + dy * dy;
+    if (d < p.half * p.half && d < bd && Math.abs(p.h + 1.5 - gy) < 16) { bd = d; best = p; }
+  }
+  return best ? { h: best.h, hike: best.k === "t", k: best.k } : null;
+}
+const groundAt = (px, py, gy = PLAYER.gy) => { const t = trailAt(px, py, gy); return t ? t.h + 1.5 : 0; };
 // Logs across the trail: too high to walk through, so press Space to jump over them.
 const JUMPS = [];
 for (const i of [150, 300, 430, 560, 690, 800, 880]) { const t = TRAIL[i]; JUMPS.push({ x: t.x - 9, y: t.y - 9, w: 18, h: 18, hz: 12, a: t.a, cx: t.x, cy: t.y, h0: t.h }); }
@@ -201,12 +224,13 @@ const BODY = { w: 18, h: 14 };                 // the player's feet, for walls
 
 // ---- helpers ----
 const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-function free(px, py, body = BODY) {
+function free(px, py, body = BODY, gy = PLAYER.gy) {
   if (inside && inside.on) return inside.free(px, py, body);
   const box = { x: px - body.w / 2, y: py - body.h / 2, w: body.w, h: body.h };
-  const tr = trailAt(px, py);                     // on the hiking trail you may go beyond the edge, and past the mountain's foot
+  const tr = trailAt(px, py, gy);                 // on the hiking trail you may go beyond the edge, and past the mountain's foot
+  if (!tr && gy > 12) return false;               // up on the highway or a ramp you cannot step off the edge
   if (!tr && (box.x < -OUT || box.y < -OUT || box.x + box.w > W + OUT || box.y + box.h > H + OUT)) return false;
-  for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) { if (tr && c === HIKE_BLOCK) continue; return false; }
+  for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) { if (tr && tr.hike && c === HIKE_BLOCK) continue; return false; }
   for (const j of JUMPS) if (hit(box, j) && PLAYER.hop < j.hz) return false;
   return !SOLID.some((s) => hit(box, s));
 }
@@ -294,6 +318,16 @@ function roadTex(horizontal) {
   }, [1, 1]);
 }
 const ROAD_H = roadTex(true), ROAD_V = roadTex(false);
+const glowMats = [];                               // wall materials whose windows light up at night
+const GLOW_BASE = canvasTex(128, 128, (g) => {
+  g.fillStyle = "#000"; g.fillRect(0, 0, 128, 128);
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) { g.fillStyle = (r + c) % 3 === 0 ? "#fff" : "#e8c070"; g.fillRect(18 + c * 60, 26 + r * 56, 38, 26); }
+}, [1, 1]);
+function litWalls(tex, roughness = 0.7) {
+  const glow = GLOW_BASE.clone(); glow.needsUpdate = true; glow.repeat.copy(tex.repeat);
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness, emissive: new THREE.Color("#ffcf7a"), emissiveMap: glow, emissiveIntensity: 0 });
+  glowMats.push(m); return m;
+}
 function facadeTex(body, trim) {
   return canvasTex(128, 128, (g) => {
     g.fillStyle = body; g.fillRect(0, 0, 128, 128);
@@ -452,7 +486,7 @@ function addBuilding(s) {
   if (s.roof !== "none") {
     const tex = facadeTex(s.body, s.trim);
     tex.repeat.set(Math.max(1, s.w / 120), Math.max(1, bodyH / 60));
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(s.w, bodyH, s.h), [mat(s.body), mat(s.body), mat(s.body), mat(s.body), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 }), mat(s.body)]);
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(s.w, bodyH, s.h), [mat(s.body), mat(s.body), mat(s.body), mat(s.body), litWalls(tex), mat(s.body)]);
     walls.position.set(cx, bodyH / 2, cz); walls.castShadow = true; walls.receiveShadow = true; g.add(walls);
   }
   // door on the front (the side facing you, to the south)
@@ -508,7 +542,7 @@ function addFia(s) {
   const g = new THREE.Group();
   const cx = s.x + s.w / 2;
   // the terminal: a long hall at the back, two piers reaching towards the runway, and a glass front
-  const hall = new THREE.Mesh(new THREE.BoxGeometry(s.w - 120, s.H, 100), [mat(s.body), mat(s.body), mat(s.body), mat(s.body), new THREE.MeshStandardMaterial({ map: facadeTex(s.body, s.trim), roughness: 0.5 }), mat(s.body)]);
+  const hall = new THREE.Mesh(new THREE.BoxGeometry(s.w - 120, s.H, 100), [mat(s.body), mat(s.body), mat(s.body), mat(s.body), litWalls(facadeTex(s.body, s.trim), 0.5), mat(s.body)]);
   hall.position.set(cx, s.H / 2, s.y + 55); hall.castShadow = true; hall.receiveShadow = true; g.add(hall);
   const roof = new THREE.Mesh(new THREE.BoxGeometry(s.w - 100, 6, 112), mat(s.trim)); roof.position.set(cx, s.H + 3, s.y + 55); roof.castShadow = true; g.add(roof);
   const glass = new THREE.Mesh(new THREE.BoxGeometry(s.w - 300, s.H * 0.8, 6), mat("#8fc1e3", { roughness: 0.1, metalness: 0.5 })); glass.position.set(cx, s.H * 0.42, s.y + 107); g.add(glass);
@@ -597,6 +631,7 @@ const trees = [];
     if (RIVERS.some((rv) => rv.some((pt, k) => k && distSeg2(x, y, rv[k - 1], pt) < 28))) continue;
     if (Math.hypot(x - HIKE.x, y - HIKE.y) < HIKE.r * 1.0) continue;
     if (nearHighway(x, y)) continue;
+    if (RAMPS.some((r) => distSeg2(x, y, [r.x0, r.y0], [r.x1, r.y1]) < 44)) continue;
     if (trees.some((t) => Math.hypot(x - t.x, y - t.y) < 26)) continue;
     trees.push({ x, y, kind: r() < 0.6 ? "pine" : "round", k: 0.9 + r() * 0.8 });
   }
@@ -714,11 +749,14 @@ let night = false;
 const hemi = scene.children.find((o) => o.isHemisphereLight);
 const lamps = [];
 const lampMat = new THREE.MeshStandardMaterial({ color: "#fff2c2", emissive: "#ffd36b", emissiveIntensity: 0 });
+const poolMat = new THREE.MeshBasicMaterial({ color: "#ffd98a", transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+const poolGeo = new THREE.CircleGeometry(38, 24);
 function addLamp(x, z, y = 0) {
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 44, 8), mat("#4a4f57")); pole.position.y = 22; pole.castShadow = true; g.add(pole);
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(4, 10, 8), lampMat); bulb.position.y = 45; g.add(bulb);
   g.position.set(x, y, z); scene.add(g); lamps.push(g);
+  const pool = new THREE.Mesh(poolGeo, poolMat); pool.rotation.x = -Math.PI / 2; pool.position.set(x, y + 0.45, z); scene.add(pool);
 }
 for (let x = 70; x < W - 40; x += 150) { addLamp(x, 476); addLamp(x, 594); }
 function setNight(on) {
@@ -726,6 +764,8 @@ function setNight(on) {
   hemi.intensity = on ? 0.35 : 0.95;
   sun.intensity = on ? 0.2 : 1.15;
   lampMat.emissiveIntensity = on ? 2.4 : 0;
+  poolMat.opacity = on ? 0.3 : 0;
+  for (const m of glowMats) m.emissiveIntensity = on ? 1.7 : 0;
   scene.background = on ? new THREE.Color("#0c1630") : skyTex;
   scene.fog.color.set(on ? "#0c1630" : "#cfe3ef");
   jmMsg = on ? "Night mode. The street lamps are on. Press N for day." : "Day mode. Press N for night.";
@@ -777,12 +817,13 @@ for (const [route, n, vmax] of [[ROUTE_A, 5, 95], [ROUTE_B, 5, 90], [ROUTE_C, 2,
   for (let i = 0; i < n; i++) cars.push({ g: makeCar(CAR_COLS[carIdx++ % CAR_COLS.length]), route, s: (i / n) * route.L, v: 0, vmax: vmax * (0.9 + (carIdx % 3) * 0.06), hd: 0 });
 }
 function updateCars(dt) {
-  const others = (c) => [...cars.filter((o) => o !== c).map((o) => ({ x: o.g.position.x, y: o.g.position.z })), ...(busApi ? busApi.buses.map((b) => ({ x: b.g.position.x, y: b.g.position.z })) : []), { x: jm.position.x, y: jm.position.z }, { x: PLAYER.x, y: PLAYER.y }];
+  const others = (c) => [...cars.filter((o) => o !== c).map((o) => ({ x: o.g.position.x, y: o.g.position.z, e: o.elev || 0 })), ...(busApi ? busApi.buses.map((b) => ({ x: b.g.position.x, y: b.g.position.z, e: b.r.elev || 0 })) : []), { x: jm.position.x, y: jm.position.z, e: 0 }, { x: PLAYER.x, y: PLAYER.y, e: PLAYER.gy }];
   for (const c of cars) {
     const p = routePos(c.route, c.s), q = routePos(c.route, c.s + 30);
     let gap = Infinity;
     for (const o of others(c)) {
       const px = o.x - p.x, pz = o.y - p.y, ahead = px * p.hx + pz * p.hy, side = Math.abs(-px * p.hy + pz * p.hx);
+      if (Math.abs(o.e - (c.elev || 0)) > 14) continue;
       if (ahead > 0 && ahead < 70 && side < 13) gap = Math.min(gap, ahead);
     }
     const bend = Math.abs(Math.atan2(p.hx * q.hy - p.hy * q.hx, p.hx * q.hx + p.hy * q.hy));
@@ -836,19 +877,20 @@ const MW = W + 2 * MAPM, MH = H + 2 * MAPM;
 const mini = document.createElement("canvas");
 mini.width = 760; mini.height = Math.round(760 * MH / MW);
 mini.setAttribute("aria-hidden", "true");
-let bigMap = false;
+let bigMap = false, mapHidden = false;
 function sizeMap() {
   mini.style.cssText = `position:absolute;right:10px;top:10px;width:${bigMap ? "auto" : "300px"};height:${bigMap ? "calc(100% - 20px)" : "auto"};max-width:94%;aspect-ratio:${MW}/${MH};border:2px solid #fff;border-radius:8px;background:#4f8a3c;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:${bigMap ? 4 : 1};`;
 }
-function toggleBigMap() { bigMap = !bigMap; sizeMap(); miniAt = 0; }
+function toggleBigMap() { mapHidden = false; bigMap = !bigMap; sizeMap(); miniAt = 0; }
+function toggleMapHidden() { mapHidden = !mapHidden; miniAt = 0; jmMsg = mapHidden ? "Map hidden. Press H to show it." : "Map shown. Press H to hide it."; }
 sizeMap();
 stage.style.position = "relative";
 stage.appendChild(mini);
 const mctx = mini.getContext("2d");
 let miniAt = 0;
 function drawMini(now) {
-  mini.style.display = inside.on ? "none" : "";
-  if (inside.on || now - miniAt < 100) return;
+  mini.style.display = inside.on || mapHidden ? "none" : "";
+  if (inside.on || mapHidden || now - miniAt < 100) return;
   miniAt = now;
   const g = mctx, w = mini.width, h = mini.height, sc = w / MW;
   const X = (x) => (x + MAPM) * sc, Y = (y) => (y + MAPM) * sc, L = (v) => v * sc;
@@ -951,6 +993,7 @@ for (const s of B) {
   const awning = new THREE.Mesh(new THREE.BoxGeometry(38, 2.5, 10), mat(s.trim)); awning.position.set(cx, 30, s.y + s.h + 6); awning.castShadow = true; scene.add(awning);
   const bench = new THREE.Mesh(new THREE.BoxGeometry(14, 4, 4), mat("#8b5a2b")); bench.position.set(cx - 34, 3, dz); bench.castShadow = true; scene.add(bench);
   const bin = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 7, 10), mat("#2f5d3a")); bin.position.set(cx + 34, 3.5, dz); bin.castShadow = true; scene.add(bin);
+  const lantern = new THREE.Mesh(new THREE.SphereGeometry(2.6, 8, 6), lampMat); lantern.position.set(cx, 26, s.y + s.h + 8); scene.add(lantern);
 }
 // Lamps along the new roads, on one side.
 SEGS.forEach(([x1, y1, x2, y2], k) => {
@@ -1137,7 +1180,7 @@ function spawnMyCar(id) {
   if (drive.mesh) scene.remove(drive.mesh);
   drive.mesh = buildCarMesh(id); drive.id = id; drive.speed = CAR_SPEEDS[id] || 1.5;
   if (!drive.x && !drive.y) { drive.x = 392; drive.y = 770; drive.a = Math.PI / 2; }
-  drive.mesh.position.set(drive.x, 0, drive.y); drive.mesh.rotation.y = drive.a;
+  drive.mesh.position.set(drive.x, PLAYER.gy, drive.y); drive.mesh.rotation.y = drive.a;
 }
 async function carApi(method, path, body) {
   if (!CFG || !cloudMod || !cloudMod.cloudLinked()) throw new Error("login");
@@ -1207,15 +1250,15 @@ function driveStep(dt) {
   const nx = drive.x + Math.sin(drive.a) * drive.v * dt, ny = drive.y + Math.cos(drive.a) * drive.v * dt;
   if (free(nx, ny, CARBODY)) { drive.x = nx; drive.y = ny; } else drive.v *= -0.2;
   PLAYER.x = drive.x; PLAYER.y = drive.y;
-  drive.mesh.position.set(drive.x, 0, drive.y); drive.mesh.rotation.y = drive.a;
+  drive.mesh.position.set(drive.x, PLAYER.gy, drive.y); drive.mesh.rotation.y = drive.a;
 }
 loadGarage();
 
 // The trail up the big mountain, the highway round the town, and its bridges (walk-world.js)
-createWorld({ THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H });
+createWorld({ THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H });
 
 // The buses (walk-bus.js)
-busApi = createBus({ THREE, scene, mat, label, PLAYER, stage, W, H, RB, SOLID, makeFigure, routePos, makeRoute, ringS, ringLane, LOOP, cars, jm, setMsg: (t) => { jmMsg = t; } });
+busApi = createBus({ THREE, scene, mat, label, PLAYER, stage, W, H, RB, SOLID, HWY, HWY_H, RAMPS, makeFigure, routePos, makeRoute, ringS, ringLane, LOOP, cars, jm, setMsg: (t) => { jmMsg = t; } });
 
 // Inside the shops (walk-inside.js)
 inside = createInside({ THREE, scene, mat, label, makeFigure, PLAYER, stage, B, tileTex, carApi, loggedIn: () => !!(cloudMod && cloudMod.cloudLinked()), free, openRoutes: () => busApi.showRoutes(), openGarage: () => showGarage() });
@@ -1245,6 +1288,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "k") busApi.showRoutes();
   if (e.code === "Space") { e.preventDefault(); if (!PLAYER.riding && !drive.on && PLAYER.hop === 0 && !e.repeat) PLAYER.vh = 190; }
   if (k === "m") toggleBigMap();
+  if (k === "h") toggleMapHidden();
   if (k === "i") { if (inside.panelOpen) inside.close(); else inside.openBag(); }
   if (k === "v") toggleCar();
   if (k === "g") toggleGarage();
