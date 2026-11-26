@@ -75,7 +75,7 @@ const named = (l, name) => Object.assign(l, { name });
     let name = fixedName;
     if (!name) { const base = buildingName(px, py), k = names.get(base) || 0; names.set(base, k + 1); name = k === 0 ? base : k === 1 ? "Opp " + base : `${base} ${k}`; }
     const code = String(10000 + ((stops.length * 7919 + 1301) % 89999)).padStart(5, "0");
-    const st = { x: px, y: py, lx: x, ly: y, hx, hy, name, code, routes: [], elev };
+    const st = { x: px, y: py, lx: x, ly: y, hx, hy, name, code, routes: [], elev, wait: Math.random() < 0.5 ? 1 + Math.floor(Math.random() * 3) : 0, nt: 10 + Math.random() * 50 };
     stops.push(st); return st;
   }
   for (const r of ROUTES) {
@@ -101,7 +101,7 @@ const named = (l, name) => Object.assign(l, { name });
       let total = 0; const seg = [];
       for (let i = 0; i + 1 < l.pts.length; i++) { const len = Math.hypot(l.pts[i + 1][0] - l.pts[i][0], l.pts[i + 1][1] - l.pts[i][1]); seg.push([l.pts[i], l.pts[i + 1], len, total]); total += len; }
       if (total < 50) return;
-      const spots = l.name ? [total / 2] : total < 240 ? [total / 2] : (() => { const a = []; for (let t = 120; t < total - 110; t += 230) a.push(t); return a; })();
+      const spots = l.name ? [total / 2] : total < 300 ? [] : total < 620 ? [total / 2] : (() => { const a = []; for (let t = 200; t < total - 180; t += 560) a.push(t); return a; })();
       for (const t of spots) {
         const g = seg.find((s) => t <= s[3] + s[2]) || seg[seg.length - 1], f = (t - g[3]) / g[2], x = g[0][0] + (g[1][0] - g[0][0]) * f, y = g[0][1] + (g[1][1] - g[0][1]) * f;
         const hx = (g[1][0] - g[0][0]) / g[2], hy = (g[1][1] - g[0][1]) / g[2];
@@ -131,7 +131,7 @@ const named = (l, name) => Object.assign(l, { name });
     const lbl = label(st.name, { size: 28, bg: "rgba(255,255,255,.96)" }); lbl.scale.multiplyScalar(0.28); lbl.position.set(2, 33, 2); g.add(lbl);
     scene.add(g);
     st.g = g;
-    if (i % 3 === 0 && !st.bay && !st.elev) { const f = makeFigure(["#e4572e", "#17bebb", "#ffc914", "#76b041"][i % 4]); const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); f.position.set(st.x + (5 * c + 2 * s), 0, st.y + (-5 * s + 2 * c)); f.rotation.y = g.rotation.y - Math.PI / 2; }
+    if (!st.bay && !st.elev) { const f = makeFigure(["#e4572e", "#17bebb", "#ffc914", "#76b041"][i % 4]); st.fig = f; const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); f.position.set(st.x + (5 * c + 2 * s), 0, st.y + (-5 * s + 2 * c)); f.rotation.y = g.rotation.y - Math.PI / 2; }
   }
 
   // ---- the bus: a single-decker, low floor, two doors on the left (kerb) side ----
@@ -166,7 +166,10 @@ const named = (l, name) => Object.assign(l, { name });
   }
 
   // ---- driving ----
+  // does this bus stop here? Only if someone is waiting, someone on board wants off, or you are standing at the stop.
+  const wants = (b, st) => st.bay || st.elev || st.wait > 0 || b.off || b.req || (!S.ride && stopNear(70) === st);
   function update(dt) {
+    for (const st of stops) { st.nt -= dt; if (st.nt <= 0) { st.wait = st.wait ? 0 : 1 + Math.floor(Math.random() * 3); st.nt = 15 + Math.random() * 45; } if (st.fig) st.fig.visible = st.wait > 0; }
     const pts = [...cars.map((o) => ({ x: o.g.position.x, y: o.g.position.z, e: o.elev || 0, o })), { x: jm.position.x, y: jm.position.z, e: 0 }, ...(PLAYER.riding || S.ride ? [] : [{ x: PLAYER.x, y: PLAYER.y, e: PLAYER.gy }])];
     for (const b of buses) {
       const r = b.r, L = r.route.L, st = r.stops[b.si], p = routePos(r.route, b.s), q = routePos(r.route, b.s + 40);
@@ -174,7 +177,7 @@ const named = (l, name) => Object.assign(l, { name });
       if (b.state === "dwell") { b.t -= dt; b.v = 0; if (b.t <= 0) { b.state = "go"; b.si = (b.si + 1) % r.stops.length; b.leftAt = b.s; } }
       else {
         let target = b.vmax;
-        if (d < 110) target = Math.min(target, Math.max(7, d * 0.55));
+        if (d < 110 && wants(b, st.stop)) target = Math.min(target, Math.max(7, d * 0.55));
         const bend = Math.abs(Math.atan2(p.hx * q.hy - p.hy * q.hx, p.hx * q.hx + p.hy * q.hy));
         if (bend > 0.5) target = Math.min(target, 22);
         let gap = Infinity;
@@ -184,7 +187,10 @@ const named = (l, name) => Object.assign(l, { name });
         b.v += (target - b.v) * Math.min(1, dt * (target < b.v ? 4.5 : 1.2));
         b.s += b.v * dt;
         const d2 = (st.s - b.s + L) % L;
-        if ((d2 < 3 || d2 > L - 4) && b.v < 14 && !(b.leftAt != null && Math.abs(b.s - b.leftAt) < 20)) { b.state = "dwell"; b.t = 7 + (b.si % 3) * 1.5; b.v = 0; b.s = st.s; }
+        if ((d2 < 3 || d2 > L - 4) && !(b.leftAt != null && Math.abs(b.s - b.leftAt) < 20)) {
+          if (wants(b, st.stop) && b.v < 14) { b.state = "dwell"; b.t = 7 + (b.si % 3) * 1.5; b.v = 0; b.s = st.s; st.stop.wait = 0; st.stop.nt = 25 + Math.random() * 40; b.req = false; b.off = Math.random() < 0.3; }
+          else { b.si = (b.si + 1) % r.stops.length; b.leftAt = b.s; }   // nobody there: drive past
+        }
       }
       const np = routePos(r.route, b.s);
       b.g.position.set(np.x, r.elev || 0, np.y);
@@ -228,7 +234,7 @@ const named = (l, name) => Object.assign(l, { name });
       row.append(mk("span", { textContent: r.no, style: `background:${r.col};color:#fff;font-weight:700;border-radius:5px;padding:2px 7px;min-width:34px;text-align:center` }), mk("span", { textContent: r.name, style: "flex:1" }), mk("span", { textContent: ts.slice(0, 2).map(fmt).join("  "), style: "font-weight:700;font-variant-numeric:tabular-nums" }));
       kids.push(row);
     }
-    kids.push(mk("p", { textContent: "Times are estimates. A bus that is at the stop shows Arr. Press E to board when it is here.", style: "margin:8px 0 0;color:#666;font-size:12px" }), mk("p", { textContent: "Press B or Esc to close.", style: "margin:2px 0 0;color:#666;font-size:12px" }));
+    kids.push(mk("p", { textContent: "Times are estimates. A bus skips a stop where nobody waits, but it will stop for you if you stand here. A bus that is at the stop shows Arr. Press E to board.", style: "margin:8px 0 0;color:#666;font-size:12px" }), mk("p", { textContent: "Press B or Esc to close.", style: "margin:2px 0 0;color:#666;font-size:12px" }));
     panel.replaceChildren(...kids); panel.hidden = false;
   }
   function showArrivals() {
@@ -239,7 +245,7 @@ const named = (l, name) => Object.assign(l, { name });
   function showRoutes() {
     if (panelKind === "routes") return close();
     panelKind = "routes";
-    const kids = [mk("strong", { textContent: "Octee bus routes" }), mk("p", { textContent: "Every route is a loop that starts and ends at the Octee Central Bus Terminal. Buses wait at every stop, so you must wait for one.", style: "margin:6px 0;color:#444;font-size:13px" })];
+    const kids = [mk("strong", { textContent: "Octee bus routes" }), mk("p", { textContent: "Every route is a loop that starts and ends at the Octee Central Bus Terminal. A bus only stops where someone is waiting or wants to get off, so it may drive past an empty stop. Stand at a stop and the bus will stop for you. On the bus, press E to ask for the next stop.", style: "margin:6px 0;color:#444;font-size:13px" })];
     for (const r of ROUTES) {
       const names = r.stops.filter((q) => !q.stop.bay).map((q) => q.stop.name);
       const d = mk("details", { style: "margin:5px 0" });
@@ -256,11 +262,11 @@ const named = (l, name) => Object.assign(l, { name });
     const st = stopNear(70); if (!st) return false;
     const b = buses.find((x) => x.state === "dwell" && r2stop(x) === st);
     if (!b) { setMsg("No bus is here yet. Press B to see when they come."); return true; }
-    S.ride = b; close(); setMsg(`You got on the ${b.r.no}. It goes round the loop and stops at every stop. Press E to get off when it is stopped.`); return true;
+    S.ride = b; close(); setMsg(`You got on the ${b.r.no}. It goes round the loop. Press E to ask for the next stop, then E again to get off.`); return true;
   }
   function alight() {
     const b = S.ride; if (!b) return false;
-    if (b.state !== "dwell") { setMsg("Wait until the bus has stopped."); return true; }
+    if (b.state !== "dwell") { b.req = true; setMsg("Stop requested. The bus will stop at the next stop."); return true; }
     const st = r2stop(b); S.ride = null;
     PLAYER.x = st.x + st.hy * 4; PLAYER.y = st.y - st.hx * 4; PLAYER.gy = st.elev || 0;
     setMsg("You got off at " + st.name + ".");

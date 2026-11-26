@@ -3,12 +3,13 @@
 import * as THREE from "three";
 import { createInside } from "./walk-inside.js";
 import { createWorld } from "./walk-world.js";
+import { createMario } from "./walk-mario.js";
 import { createBus } from "./walk-bus.js";
 // The cloud is only needed to buy a car. The walk works without it.
 let CFG = null, cloudMod = null;
 try { CFG = (await import("./config.js")).CONFIG; cloudMod = await import("./cloud.js"); } catch { /* no cloud: the walk still works */ }
 
-let inside = null, busApi = null;                   // the shop interiors (see walk-inside.js), made once the scene exists
+let inside = null, busApi = null, mario = null;                   // the shop interiors (see walk-inside.js), made once the scene exists
 const W = 2600, H = 1200;            // the town, in world units (1 unit is roughly a metre of a very small town)
 
 // Buildings: a box on the ground (x, y = top-left in plan), its height, and its colours and extras.
@@ -1258,6 +1259,7 @@ loadGarage();
 createWorld({ THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H });
 
 // The buses (walk-bus.js)
+mario = createMario({ THREE, scene, mat, PLAYER, TRAIL, TRAIL_W, HIKE, JUMPS, stage, loggedIn: () => !!(cloudMod && cloudMod.cloudLinked()), cloudPlay: (score) => carApi("POST", "/api/city/play", { game: "hike", score }) });
 busApi = createBus({ THREE, scene, mat, label, PLAYER, stage, W, H, RB, SOLID, HWY, HWY_H, RAMPS, makeFigure, routePos, makeRoute, ringS, ringLane, LOOP, cars, jm, setMsg: (t) => { jmMsg = t; } });
 
 // Inside the shops (walk-inside.js)
@@ -1349,6 +1351,7 @@ function frame(now) {
     if (PLAYER.hop > 0 || PLAYER.vh) { PLAYER.vh -= 520 * dt; PLAYER.hop += PLAYER.vh * dt; if (PLAYER.hop <= 0) { PLAYER.hop = 0; PLAYER.vh = 0; } }
     PLAYER.z = PLAYER.gy + PLAYER.hop; }
   busApi.update(dt);
+  mario.update(dt, now);
   updateJM(dt);
   updateCars(dt);
   updatePeds(dt);
@@ -1394,4 +1397,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // For tests: lets a script read where you are and what the Joelmobile is doing.
-window.__walk = { busApi, TRAIL, groundAt, inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
+window.__walk = { mario, busApi, TRAIL, groundAt, inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
