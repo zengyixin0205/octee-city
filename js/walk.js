@@ -1,6 +1,9 @@
 // Walk around Octee City in 3D (Three.js). WASD or arrow keys to walk, E to go in, call the Joelmobile at a stop, or get on it.
 // Everything is drawn in code: no photos. The map is hand-placed and not symmetrical.
 import * as THREE from "three";
+// The cloud is only needed to buy a car. The walk works without it.
+let CFG = null, cloudMod = null;
+try { CFG = (await import("./config.js")).CONFIG; cloudMod = await import("./cloud.js"); } catch { /* no cloud: the walk still works */ }
 
 const W = 1800, H = 1200;            // the town, in world units (1 unit is roughly a metre of a very small town)
 
@@ -36,6 +39,29 @@ const B = [
 const FIA = { id: "fia", name: "FIA airport", x: 1280, y: 40, w: 440, h: 190, H: 36, body: "#e8eef4", trim: "#33414e", roof: "flat", runway: true, href: "https://zengyixin0205.github.io/Octee-airline/" };
 const SOLID = [...B, FIA];
 
+// The countryside beyond the ring road: you can walk out to OUT units past the edge of town.
+const OUT = 420;
+const WILD = {
+  hills: [
+    { x: -300, y: 300, r: 150, h: 130, power: 1.5, noise: 0.04, seed: 3 },   // the hill with the waterfall
+    { x: 400, y: 1420, r: 150, h: 75, power: 1.4, noise: 0.14, seed: 5 },
+    { x: W + 260, y: 380, r: 170, h: 85, power: 1.4, noise: 0.14, seed: 9 },
+    { x: W + 300, y: 930, r: 130, h: 60, power: 1.4, noise: 0.14, seed: 11 },
+  ],
+  lakes: [{ x: -95, y: 300, r: 60 }, { x: -105, y: 790, r: 38 }, { x: 1000, y: 1350, r: 120 }],
+};
+const RIVER = [[-95, 360], [-100, 430], [-85, 520], [-100, 610], [-90, 700], [-105, 760]];
+const MOUNTAINS = [
+  { x: 100, y: -260, r: 200, h: 260, seed: 21 }, { x: 520, y: -270, r: 170, h: 200, seed: 22 }, { x: 900, y: -280, r: 230, h: 310, seed: 23 },
+  { x: 1380, y: -265, r: 180, h: 230, seed: 24 }, { x: 1700, y: -270, r: 210, h: 280, seed: 25 }, { x: W + 330, y: 120, r: 170, h: 220, seed: 26 },
+].map((m) => ({ ...m, power: 1.05, noise: 0.5, snow: true }));
+// Things you cannot walk through out there: hills, mountains and lakes (the river is shallow).
+const BLOCKERS = [...WILD.hills.map((h) => ({ x: h.x, y: h.y, r: h.r * 0.7 })), ...MOUNTAINS.map((m) => ({ x: m.x, y: m.y, r: m.r * 0.6 })), ...WILD.lakes];
+function distSeg2(px, py, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
+}
+
 // Extra roads, as segments [x1, y1, x2, y2]. A K joins the main street, and an F joins the south street.
 const ROAD_W = 22;
 // Our own road layout: a roundabout north-east of the main street, with three roads leading off it.
@@ -59,16 +85,9 @@ function segDist(px, py, [x1, y1, x2, y2]) {
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
-// Extra roads: a K shape, joined by a short link road to an F shape, and a side road from the main street down to the south street.
+// Extra roads: one side road from the main street down to the south street. The K and F roads are gone.
 const ROAD_NET = [
-  { a: [920, 140], b: [920, 280], w: 22 },    // K: stem
-  { a: [920, 210], b: [1040, 140], w: 20 },   // K: upper arm
-  { a: [920, 210], b: [1040, 280], w: 20 },   // K: lower arm
-  { a: [1040, 140], b: [1150, 145], w: 20 },  // link from K to F
-  { a: [1150, 145], b: [1150, 290], w: 22 },  // F: stem
-  { a: [1150, 145], b: [1250, 145], w: 20 },  // F: top bar
-  { a: [1150, 215], b: [1230, 215], w: 20 },  // F: middle bar
-  { a: [1650, 560], b: [1650, 1000], w: 24 }, // side road to the south street
+  { a: [1650, 560], b: [1650, 1000], w: 24 },
 ];
 function distToSeg(px, py, r) {
   const [ax, ay] = r.a, [bx, by] = r.b, dx = bx - ax, dy = by - ay;
@@ -94,9 +113,10 @@ const BODY = { w: 18, h: 14 };                 // the player's feet, for walls
 
 // ---- helpers ----
 const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-function free(px, py) {
-  const box = { x: px - BODY.w / 2, y: py - BODY.h / 2, ...BODY };
-  if (box.x < 0 || box.y < 0 || box.x + box.w > W || box.y + box.h > H) return false;
+function free(px, py, body = BODY) {
+  const box = { x: px - body.w / 2, y: py - body.h / 2, w: body.w, h: body.h };
+  if (box.x < -OUT || box.y < -OUT || box.x + box.w > W + OUT || box.y + box.h > H + OUT) return false;
+  for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) return false;
   return !SOLID.some((s) => hit(box, s));
 }
 function ringPoint(s) {                          // where the ring road is at distance s round the loop
@@ -132,9 +152,18 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 stage.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("#9fd3f0");
-scene.fog = new THREE.Fog("#c9e8f7", 1400, 3200);
-const camera = new THREE.PerspectiveCamera(46, 16 / 9, 5, 4000);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+const skyTex = (() => {
+  const c = document.createElement("canvas"); c.width = 4; c.height = 256;
+  const g = c.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, "#3f78c4"); gr.addColorStop(0.55, "#8cc2e8"); gr.addColorStop(1, "#cfe9f6");
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+scene.background = skyTex;
+scene.fog = new THREE.Fog("#cfe3ef", 1500, 4600);
+const camera = new THREE.PerspectiveCamera(46, 16 / 9, 5, 6000);
 
 scene.add(new THREE.HemisphereLight("#eaf6ff", "#4f6b35", 0.95));
 const sun = new THREE.DirectionalLight("#fff4dc", 1.15);
@@ -158,7 +187,7 @@ function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; l
 const grassTex = canvasTex(256, 256, (g, w, h) => {
   const r = rng(7); g.fillStyle = "#7db45c"; g.fillRect(0, 0, w, h);
   for (let i = 0; i < 1400; i++) { g.fillStyle = r() < 0.5 ? "#6aa54c" : "#8cc46a"; g.fillRect(r() * w, r() * h, 2 + r() * 3, 2 + r() * 3); }
-}, [60, 40]);
+}, [140, 100]);
 function roadTex(horizontal) {
   return canvasTex(256, 64, (g, w, h) => {
     g.fillStyle = "#4b4f55"; g.fillRect(0, 0, w, h);
@@ -195,7 +224,7 @@ function label(text, { bg = "rgba(255,255,255,.94)", fg = "#222", size = 40 } = 
 }
 
 // Ground and roads
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 600, H + 600), mat("#7db45c", { map: grassTex }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 3000, H + 3000), mat("#7db45c", { map: grassTex }));
 ground.rotation.x = -Math.PI / 2; ground.position.set(W / 2, -0.2, H / 2); ground.receiveShadow = true;
 scene.add(ground);
 function road(x, y, w, h, tex) {
@@ -247,7 +276,18 @@ function roadSeg(x1, y1, x2, y2) {
   oil.rotation.x = -Math.PI / 2; oil.scale.set(1.4, 1, 0.8); oil.position.set(len * 0.3 - len / 2, 0.32, -3); g.add(oil);
   scene.add(g);
 }
-for (const [x1, y1, x2, y2] of SEGS) roadSeg(x1, y1, x2, y2);
+const RING_PIECES = 16;                       // the first 16 SEGS are the roundabout, drawn below as one smooth ring
+SEGS.forEach(([x1, y1, x2, y2], i) => { if (i >= RING_PIECES) roadSeg(x1, y1, x2, y2); });
+{
+  const paving = new THREE.Mesh(new THREE.RingGeometry(RB.r - 18, RB.r + 18, 64), mat("#ffffff", { map: tileTex(14, 14) }));
+  paving.rotation.x = -Math.PI / 2; paving.position.set(RB.x, 0.1, RB.y); paving.receiveShadow = true; scene.add(paving);
+  const tar = new THREE.Mesh(new THREE.RingGeometry(RB.r - 11, RB.r + 11, 64), mat("#4b4f55", { roughness: 0.95 }));
+  tar.rotation.x = -Math.PI / 2; tar.position.set(RB.x, 0.25, RB.y); tar.receiveShadow = true; scene.add(tar);
+  for (let i = 0; i < 28; i++) {
+    const a = (i / 28) * Math.PI * 2, dash = new THREE.Mesh(new THREE.PlaneGeometry(10, 2), mat("#e9e2b5"));
+    dash.rotation.x = -Math.PI / 2; dash.rotation.z = -(a + Math.PI / 2); dash.position.set(RB.x + RB.r * Math.cos(a), 0.3, RB.y + RB.r * Math.sin(a)); scene.add(dash);
+  }
+}
 road(0, 500, W, 70, ROAD_H);                          // main street
 road(0, 1002, W, 32, ROAD_H);                         // south street
 road(0, 0, W, BAND, ROAD_H); road(0, H - BAND, W, BAND, ROAD_H);   // ring, top and bottom
@@ -339,6 +379,18 @@ const trees = [];
   for (let i = 0; i < tries && trees.length < 150; i++) {
     const x = 40 + r() * (W - 80), y = 40 + r() * (H - 80);
     if (clearOf(x, y, 22)) trees.push({ x, y, kind: r() < 0.5 ? "round" : "pine", k: 0.85 + r() * 0.45 });
+  }
+  // the countryside outside the ring road: a forest, kept off the hills, lakes, river and mountains
+  const inTown = (x, y) => x > -30 && x < W + 30 && y > -30 && y < H + 30;
+  for (let i = 0; i < 2600 && trees.length < 520; i++) {
+    const x = -OUT - 150 + r() * (W + 2 * OUT + 300), y = -OUT - 150 + r() * (H + 2 * OUT + 300);
+    if (inTown(x, y)) continue;
+    if (BLOCKERS.some((c) => Math.hypot(x - c.x, y - c.y) < c.r + 30)) continue;
+    if (WILD.hills.some((h) => Math.hypot(x - h.x, y - h.y) < h.r * 1.05)) continue;
+    if (MOUNTAINS.some((m) => Math.hypot(x - m.x, y - m.y) < m.r * 0.95)) continue;
+    if (RIVER.some((pt, k) => k && distSeg2(x, y, RIVER[k - 1], pt) < 28)) continue;
+    if (trees.some((t) => Math.hypot(x - t.x, y - t.y) < 26)) continue;
+    trees.push({ x, y, kind: r() < 0.6 ? "pine" : "round", k: 0.9 + r() * 0.8 });
   }
   for (const t of trees) {
     const g = new THREE.Group();
@@ -466,12 +518,13 @@ function setNight(on) {
   hemi.intensity = on ? 0.35 : 0.95;
   sun.intensity = on ? 0.2 : 1.15;
   lampMat.emissiveIntensity = on ? 2.4 : 0;
-  scene.background = new THREE.Color(on ? "#0c1630" : "#9fd3f0");
-  scene.fog.color.set(on ? "#0c1630" : "#c9e8f7");
+  scene.background = on ? new THREE.Color("#0c1630") : skyTex;
+  scene.fog.color.set(on ? "#0c1630" : "#cfe3ef");
   jmMsg = on ? "Night mode. The street lamps are on. Press N for day." : "Day mode. Press N for night.";
 }
 
-// Traffic: cars on the two lanes of the main street, and cars going round the ring road.
+// Traffic: cars follow set routes in the left-hand lane (as in Singapore). They keep a gap behind the car in front,
+// slow for corners, and stop for you or the Joelmobile if you are in the way.
 const cars = [];
 const CAR_COLS = ["#d33b3b", "#2f6fd1", "#f2f2f2", "#2e8b57", "#ffb000", "#6a3fb5", "#222222"];
 function makeCar(col) {
@@ -481,25 +534,59 @@ function makeCar(col) {
   scene.add(g);
   return g;
 }
-for (let i = 0; i < 10; i++) {
-  const east = i % 2 === 0;
-  cars.push({ g: makeCar(CAR_COLS[i % CAR_COLS.length]), kind: "street", x: 80 + ((i * 173) % 1640), lane: east ? 522 : 548, dir: east ? 1 : -1, v: 60 + ((i * 17) % 40) });
+// A route is a closed polyline of lane-centre points. A car's place on it is its distance s along the line.
+function makeRoute(pts) {
+  const segs = []; let L = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    segs.push({ a, b, len, start: L }); L += len;
+  }
+  return { segs, L };
 }
-for (let i = 0; i < 6; i++) cars.push({ g: makeCar(CAR_COLS[(i + 3) % CAR_COLS.length]), kind: "ring", s: (i * LOOP) / 6, v: 90 + i * 8 });
+function routePos(r, s) {
+  s = ((s % r.L) + r.L) % r.L;
+  for (const g of r.segs) if (s <= g.start + g.len) {
+    const t = (s - g.start) / g.len;
+    return { x: g.a[0] + (g.b[0] - g.a[0]) * t, y: g.a[1] + (g.b[1] - g.a[1]) * t, hx: (g.b[0] - g.a[0]) / g.len, hy: (g.b[1] - g.a[1]) / g.len };
+  }
+  const g = r.segs[r.segs.length - 1];
+  return { x: g.b[0], y: g.b[1], hx: 1, hy: 0 };
+}
+const LAN_E = 522, LAN_W = 548;   // main street lanes: eastbound in the north lane, westbound in the south lane (keep left)
+// A: east along the main street, down the east ring, west along the bottom, back up the west ring.
+const ROUTE_A = makeRoute([[RC, LAN_E], [W - RC, LAN_E], [W - RC, H - RC], [RC, H - RC]]);
+// B: west along the main street, up the west ring, east along the top, down the east ring to the main street again.
+const ROUTE_B = makeRoute([[W - RC, LAN_W], [RC, LAN_W], [RC, RC], [W - RC, RC]]);
+// C: up the south road to the roundabout, once round it (clockwise, keeping left), and back down the other lane.
+const ROUTE_C = (() => {
+  const pts = [[RB.x - 5, 520], [RB.x - 5, RB.y + RB.r + 2]];
+  for (let i = 0; i <= 36; i++) { const a = Math.PI / 2 + (i / 36) * Math.PI * 2; pts.push([RB.x + RB.r * Math.cos(a), RB.y + RB.r * Math.sin(a)]); }
+  pts.push([RB.x + 5, RB.y + RB.r + 2], [RB.x + 5, 520]);
+  return makeRoute(pts);
+})();
+let carIdx = 0;
+for (const [route, n, vmax] of [[ROUTE_A, 5, 95], [ROUTE_B, 5, 90], [ROUTE_C, 2, 55]]) {
+  for (let i = 0; i < n; i++) cars.push({ g: makeCar(CAR_COLS[carIdx++ % CAR_COLS.length]), route, s: (i / n) * route.L, v: 0, vmax: vmax * (0.9 + (carIdx % 3) * 0.06), hd: 0 });
+}
 function updateCars(dt) {
+  const others = (c) => [...cars.filter((o) => o !== c).map((o) => ({ x: o.g.position.x, y: o.g.position.z })), { x: jm.position.x, y: jm.position.z }, { x: PLAYER.x, y: PLAYER.y }];
   for (const c of cars) {
-    if (c.kind === "street") {
-      c.x += c.dir * c.v * dt;
-      if (c.x > W + 40) c.x = -40;
-      if (c.x < -40) c.x = W + 40;
-      c.g.position.set(c.x, 0, c.lane);
-      c.g.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-    } else {
-      c.s = (c.s + c.v * dt) % LOOP;
-      const p = ringPoint(c.s);
-      c.g.position.set(p.x, 0, p.y);
-      c.g.rotation.y = Math.atan2(p.dx, p.dy);
+    const p = routePos(c.route, c.s), q = routePos(c.route, c.s + 30);
+    let gap = Infinity;
+    for (const o of others(c)) {
+      const px = o.x - p.x, pz = o.y - p.y, ahead = px * p.hx + pz * p.hy, side = Math.abs(-px * p.hy + pz * p.hx);
+      if (ahead > 0 && ahead < 70 && side < 13) gap = Math.min(gap, ahead);
     }
+    const bend = Math.abs(Math.atan2(p.hx * q.hy - p.hy * q.hx, p.hx * q.hx + p.hy * q.hy));
+    let target = c.vmax * (bend > 0.4 ? 0.45 : 1);
+    if (gap < 28) target = 0; else if (gap < 70) target = Math.min(target, (c.vmax * (gap - 28)) / 42);
+    c.v += (target - c.v) * Math.min(1, dt * (target < c.v ? 5 : 1.5));
+    c.s += c.v * dt;
+    const np = routePos(c.route, c.s);
+    c.g.position.set(np.x, 0, np.y);
+    const want = Math.atan2(np.hx, np.hy);
+    let d = want - c.hd; d = Math.atan2(Math.sin(d), Math.cos(d)); c.hd += d * Math.min(1, dt * 6);
+    c.g.rotation.y = c.hd;
   }
 }
 
@@ -617,14 +704,16 @@ for (const s of B) {
   const bin = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 7, 10), mat("#2f5d3a")); bin.position.set(cx + 34, 3.5, dz); bin.castShadow = true; scene.add(bin);
 }
 // Lamps along the new roads, on one side.
-for (const [x1, y1, x2, y2] of SEGS) {
+SEGS.forEach(([x1, y1, x2, y2], k) => {
+  const ring = k < RING_PIECES;
+  if (ring && k % 4 !== 0) return;
   const len = Math.hypot(x2 - x1, y2 - y1), n = Math.max(1, Math.floor(len / 80));
-  const nx = -(y2 - y1) / len, ny = (x2 - x1) / len;
+  const nx = (ring ? 1 : -1) * -(y2 - y1) / len, ny = (ring ? 1 : -1) * (x2 - x1) / len;
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n;
     addLamp(x1 + (x2 - x1) * t + nx * (ROAD_W / 2 + 8), y1 + (y2 - y1) * t + ny * (ROAD_W / 2 + 8));
   }
-}
+});
 // Main street: tiled pavements on both sides, and tyre marks in the lanes.
 for (const z of [493, 577]) {
   const pv = new THREE.Mesh(new THREE.PlaneGeometry(W, 14), mat("#ffffff", { map: tileTex(W / 64, 14 / 64) }));
@@ -637,7 +726,7 @@ for (const [x0, x1] of [[300, 430], [980, 1110]]) for (const z of [520, 546]) fo
 }
 // Junction squares: fill the corners where two roads meet, so the joins are clean.
 const JUNCTIONS = [];
-for (const [x1, y1, x2, y2] of SEGS) JUNCTIONS.push([x1, y1], [x2, y2]);
+for (const [x1, y1, x2, y2] of SEGS.slice(RING_PIECES)) JUNCTIONS.push([x1, y1], [x2, y2]);
 for (const [x, y] of JUNCTIONS) {
   const sq = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, ROAD_W), mat("#4b4f55", { roughness: 0.95 }));
   sq.rotation.x = -Math.PI / 2; sq.position.set(x, 0.27, y); sq.receiveShadow = true; scene.add(sq);
@@ -656,10 +745,220 @@ for (const b of B) {
   path.rotation.x = -Math.PI / 2; path.position.set(cx, 0.3, (lo + hi) / 2); path.receiveShadow = true; scene.add(path);
 }
 
+// ---- the countryside: hills, mountains, lakes, a river, a waterfall, rocks and flowers ----
+function hash2(x, y) { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); }
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+const moundH = (o, d) => (d >= 1 ? 0 : o.h * Math.pow(1 - d * d, o.power));
+// A hill or mountain is a round heightfield, coloured by height: grass, scrub, rock and (for mountains) snow.
+function mound(o) {
+  const segs = o.h > 200 ? 56 : 44;
+  const geo = new THREE.PlaneGeometry(2 * o.r, 2 * o.r, segs, segs);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const px = pos.getX(i), pz = pos.getZ(i), d = Math.hypot(px, pz) / o.r;
+    let hh = -0.6;
+    if (d < 1) {
+      const n = (vnoise(px / 45 + o.seed, pz / 45 + o.seed) - 0.5) * o.noise * 2 + (vnoise(px / 14 + o.seed, pz / 14) - 0.5) * o.noise * 0.6;
+      hh = Math.max(-0.6, moundH(o, d) * (1 + n));
+    }
+    pos.setY(i, hh);
+    const t = o.h ? Math.max(0, hh) / o.h : 0;
+    const c = o.snow && t > 0.72 ? [0.95, 0.97, 1.0] : t > 0.52 ? [0.5, 0.47, 0.42] : t > 0.26 ? [0.4, 0.52, 0.32] : [0.34, 0.56, 0.27];
+    const j = 0.92 + hash2(i, 7) * 0.14;
+    col[i * 3] = c[0] * j * 0.72; col[i * 3 + 1] = c[1] * j * 0.72; col[i * 3 + 2] = c[2] * j * 0.72;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }));
+  m.position.set(o.x, 0, o.y); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+}
+for (const h of WILD.hills) mound(h);
+for (const m of MOUNTAINS) mound(m);
+
+// Water: lakes with a sandy shore, a river, and ripples that drift.
+const waterTex = canvasTex(128, 128, (g) => {
+  const r = rng(21); g.fillStyle = "#3d8fb8"; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 160; i++) { g.strokeStyle = r() < 0.5 ? "rgba(255,255,255,.22)" : "rgba(10,60,90,.18)"; g.lineWidth = 1 + r() * 1.5; g.beginPath(); const x = r() * 128, y = r() * 128; g.moveTo(x, y); g.quadraticCurveTo(x + 8, y - 3, x + 18, y); g.stroke(); }
+}, [1, 1]);
+const waters = [];
+function waterMat(rx, ry) {
+  const t = waterTex.clone(); t.needsUpdate = true; t.repeat.set(rx, ry); waters.push(t);
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.22, metalness: 0.15, transparent: true, opacity: 0.94 });
+}
+for (const l of WILD.lakes) {
+  const shore = new THREE.Mesh(new THREE.CircleGeometry(l.r + 11, 48), mat("#d6c595"));
+  shore.rotation.x = -Math.PI / 2; shore.position.set(l.x, 0.3, l.y); shore.receiveShadow = true; scene.add(shore);
+  const lake = new THREE.Mesh(new THREE.CircleGeometry(l.r, 48), waterMat(l.r / 22, l.r / 22));
+  lake.rotation.x = -Math.PI / 2; lake.position.set(l.x, 0.55, l.y); lake.receiveShadow = true; scene.add(lake);
+}
+for (let k = 1; k < RIVER.length; k++) {
+  const [x1, y1] = RIVER[k - 1], [x2, y2] = RIVER[k], len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1);
+  const g = new THREE.Group(); g.position.set((x1 + x2) / 2, 0, (y1 + y2) / 2); g.rotation.y = -ang;
+  const bank = new THREE.Mesh(new THREE.PlaneGeometry(len + 14, 30), mat("#d6c595")); bank.rotation.x = -Math.PI / 2; bank.position.y = 0.3; g.add(bank);
+  const flow = new THREE.Mesh(new THREE.PlaneGeometry(len + 14, 18), waterMat(len / 36, 0.5)); flow.rotation.x = -Math.PI / 2; flow.position.y = 0.5; g.add(flow);
+  scene.add(g);
+}
+// The waterfall pours down the east face of the big hill into the lake. It follows the hill's curve, a little above it.
+const WA = WILD.hills[0];
+const fallTex = canvasTex(64, 128, (g) => {
+  const r = rng(33); g.fillStyle = "#bfe6f7"; g.fillRect(0, 0, 64, 128);
+  for (let i = 0; i < 40; i++) { g.fillStyle = r() < 0.5 ? "rgba(255,255,255,.9)" : "rgba(80,160,200,.55)"; g.fillRect(r() * 64, r() * 128, 2 + r() * 4, 14 + r() * 34); }
+}, [1, 3]);
+const fall = (() => {
+  const steps = 14, d0 = 0.5, d1 = 1.0, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= steps; i++) {
+    const d = d0 + ((d1 - d0) * i) / steps, x = WA.x + WA.r * d, y = i === steps ? 0.9 : moundH(WA, d) + 3.5;
+    pos.push(x, y, WA.y - 11, x, y, WA.y + 11); uv.push(0, i / steps, 1, i / steps);
+    if (i < steps) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: fallTex, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+  scene.add(m);
+  return m;
+})();
+const foam = [];
+for (let i = 0; i < 7; i++) {
+  const f = new THREE.Mesh(new THREE.SphereGeometry(6 + (i % 3) * 2, 8, 6), new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.55 }));
+  f.position.set(WA.x + WA.r * 1.0 + 4, 3, WA.y - 15 + i * 5); f.scale.y = 0.5; scene.add(f); foam.push(f);
+}
+function updateLandscape(dt, now) {
+  fallTex.offset.y -= dt * 1.4;
+  waters.forEach((t, i) => { t.offset.x += dt * 0.012; t.offset.y += dt * 0.006 * (1 + (i % 3)); });
+  foam.forEach((f, i) => { const k = 1 + Math.sin(now / 280 + i) * 0.18; f.scale.set(k, 0.5 * k, k); });
+}
+// Rocks round the foot of the waterfall and along the lake shores.
+{
+  const r = rng(55);
+  for (const [cx, cy, spread, n] of [[WA.x + WA.r + 10, WA.y, 50, 12], [1000, 1350, 150, 10], [-95, 300, 80, 8]]) {
+    for (let i = 0; i < n; i++) {
+      const a = r() * Math.PI * 2, d = 30 + r() * spread, k = 3 + r() * 6;
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(k, 0), mat(r() < 0.5 ? "#8a8579" : "#6f6a60", { flatShading: true }));
+      rock.position.set(cx + Math.cos(a) * d, k * 0.4, cy + Math.sin(a) * d); rock.rotation.set(r() * 3, r() * 3, r() * 3); rock.castShadow = true; scene.add(rock);
+    }
+  }
+}
+// Flowers dotted over the grass in town.
+{
+  const r = rng(9), spots = [];
+  const okSpot = (x, y) => {
+    if (x < BAND + 14 || x > W - BAND - 14 || y < BAND + 14 || y > H - BAND - 14) return false;
+    if ((y > 478 && y < 592) || (y > 986 && y < 1040)) return false;
+    for (const b of SOLID) if (x > b.x - 12 && x < b.x + b.w + 12 && y > b.y - 12 && y < b.y + b.h + 24) return false;
+    for (const sg of SEGS) if (segDist(x, y, sg) < ROAD_W / 2 + 22) return false;
+    for (const rn of ROAD_NET) if (distToSeg(x, y, rn) < rn.w / 2 + 22) return false;
+    return true;
+  };
+  for (let i = 0; i < 1800 && spots.length < 260; i++) { const x = r() * W, y = r() * H; if (okSpot(x, y)) spots.push([x, y]); }
+  const fl = new THREE.InstancedMesh(new THREE.SphereGeometry(2.2, 6, 5), new THREE.MeshStandardMaterial({ roughness: 0.8 }), spots.length);
+  const dummy = new THREE.Object3D(), pal = ["#ffd23f", "#ff6b9d", "#ffffff", "#b388ff", "#ff8c42"];
+  spots.forEach(([x, y], i) => { dummy.position.set(x, 2, y); dummy.updateMatrix(); fl.setMatrixAt(i, dummy.matrix); fl.setColorAt(i, new THREE.Color(pal[i % pal.length])); });
+  fl.instanceMatrix.needsUpdate = true; if (fl.instanceColor) fl.instanceColor.needsUpdate = true;
+  scene.add(fl);
+}
+
+// ---- buy a car at the Car Park, and drive it ----
+const CAR_SPEEDS = { scooter: 1.5, hatch: 2.0, sports: 2.8, limo: 2.3 };
+const CARBODY = { w: 22, h: 22 };
+const garage = { cars: [], mine: null, wallet: null, msg: "" };
+const drive = { on: false, x: 0, y: 0, a: 0, v: 0, speed: 1, mesh: null, id: null };
+function buildCarMesh(id) {
+  const [col, w, h, len] = { scooter: ["#e86a2d", 9, 5, 15], hatch: ["#2f9ed8", 13, 7, 22], sports: ["#d91e2b", 14, 5, 26], limo: ["#15151a", 13, 8, 38] }[id] || ["#888888", 12, 6, 22];
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, len), mat(col, { roughness: 0.35, metalness: 0.3 })); body.position.y = 4 + h / 2; body.castShadow = true; g.add(body);
+  if (id === "scooter") {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(12, 1.5, 1.5), mat("#222222")); bar.position.set(0, 4 + h + 4, len / 2 - 3); g.add(bar);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(6, 2, 6), mat("#222222")); seat.position.set(0, 4 + h + 1, -2); g.add(seat);
+  } else {
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(w - 2, h * 0.8, len * 0.42), mat("#a8d4ee", { roughness: 0.15, metalness: 0.4 })); cabin.position.set(0, 4 + h + h * 0.4, -len * 0.05); cabin.castShadow = true; g.add(cabin);
+  }
+  if (id === "sports") { const sp = new THREE.Mesh(new THREE.BoxGeometry(w, 1.2, 4), mat("#222222")); sp.position.set(0, 4 + h + 4, -len / 2 + 2); g.add(sp); }
+  for (const [px, pz] of [[-1, -0.32], [1, -0.32], [-1, 0.32], [1, 0.32]]) { const wh = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 3, 12), mat("#1b1b1b")); wh.rotation.z = Math.PI / 2; wh.position.set((px * (w + 2)) / 2, 4, pz * len); g.add(wh); }
+  for (const px of [-1, 1]) { const hl = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.8, 0.8), new THREE.MeshStandardMaterial({ color: "#fff3b0", emissive: "#ffe27a", emissiveIntensity: 1.2 })); hl.position.set(px * (w / 2 - 2.5), 4 + h * 0.6, len / 2 + 0.3); g.add(hl); }
+  scene.add(g);
+  return g;
+}
+function spawnMyCar(id) {
+  if (drive.mesh) scene.remove(drive.mesh);
+  drive.mesh = buildCarMesh(id); drive.id = id; drive.speed = CAR_SPEEDS[id] || 1.5;
+  if (!drive.x && !drive.y) { drive.x = 392; drive.y = 770; drive.a = Math.PI / 2; }
+  drive.mesh.position.set(drive.x, 0, drive.y); drive.mesh.rotation.y = drive.a;
+}
+async function carApi(method, path, body) {
+  if (!CFG || !cloudMod || !cloudMod.cloudLinked()) throw new Error("login");
+  const res = await fetch(CFG.CLOUD_URL + path, { method, headers: { ...(body ? { "content-type": "application/json" } : {}), authorization: "Bearer " + cloudMod.cloudState().token }, body: body ? JSON.stringify(body) : undefined });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.message || "Nothing was changed.");
+  return j;
+}
+async function loadGarage() {
+  try { const j = await carApi("GET", "/api/city/cars"); garage.cars = j.cars; garage.mine = j.mine; garage.wallet = j.wallet; if (j.mine) spawnMyCar(j.mine); } catch { /* not logged in, or the cloud is away */ }
+  renderGarage();
+}
+const garagePanel = document.createElement("div");
+garagePanel.hidden = true;
+garagePanel.style.cssText = "position:absolute;left:12px;top:12px;background:#fff;color:#222;padding:10px 12px;border-radius:10px;max-width:290px;box-shadow:0 4px 16px rgba(0,0,0,.25);font:14px/1.35 system-ui,sans-serif;z-index:5";
+stage.appendChild(garagePanel);
+function renderGarage() {
+  const kids = [Object.assign(document.createElement("strong"), { textContent: "The Car Park: cars for sale" })];
+  const note = (t) => kids.push(Object.assign(document.createElement("p"), { textContent: t, style: "margin:6px 0" }));
+  if (!cloudMod || !cloudMod.cloudLinked()) {
+    note("Log in to Octee Cloud to buy a car. Walking and looking are still free.");
+    const a = Object.assign(document.createElement("a"), { href: "https://zengyixin0205.github.io/Octee-airline/login.html", textContent: "Log in" }); kids.push(a);
+  } else if (!garage.cars.length) note("The cars are being polished. Try again in a moment.");
+  else {
+    note(`Wallet: ${garage.wallet} CCT. One car each; a new one replaces the old one, with no refund.`);
+    for (const c of garage.cars) {
+      const b = Object.assign(document.createElement("button"), { type: "button", textContent: garage.mine === c.id ? `${c.name}: yours` : `${c.name}: ${c.price} CCT (speed x${c.speed})`, disabled: garage.mine === c.id });
+      b.style.cssText = "display:block;width:100%;margin:6px 0;padding:6px 8px;border:1px solid #888;border-radius:6px;background:#f6f6f6;cursor:pointer;text-align:left";
+      b.onclick = async () => { try { const j = await carApi("POST", "/api/city/car/buy", { model: c.id }); garage.mine = j.mine; garage.wallet = j.wallet; garage.msg = j.message; spawnMyCar(j.mine); } catch (e) { garage.msg = e.message; } renderGarage(); };
+      kids.push(b);
+    }
+  }
+  if (garage.msg) note(garage.msg);
+  note("Press G to close.");
+  garagePanel.replaceChildren(...kids);
+}
+const nearCarPark = () => Math.hypot(PLAYER.x - 340, PLAYER.y - 745) < 150;
+function toggleGarage() {
+  if (!garagePanel.hidden) { garagePanel.hidden = true; return; }
+  if (!nearCarPark() || drive.on) { jmMsg = "The Car Park sells the cars. Walk to it on foot and press G."; return; }
+  garagePanel.hidden = false; garage.msg = ""; renderGarage(); loadGarage();
+}
+function toggleCar() {
+  if (!drive.mesh) { jmMsg = "You do not own a car yet. Buy one at the Car Park (press G there)."; return; }
+  if (drive.on) {
+    drive.on = false; drive.v = 0;
+    for (const [ox, oy] of [[34, 0], [-34, 0], [0, 34], [0, -34]]) if (free(drive.x + ox, drive.y + oy)) { PLAYER.x = drive.x + ox; PLAYER.y = drive.y + oy; break; }
+    jmMsg = "You got out. Press V next to the car to get back in."; return;
+  }
+  if (PLAYER.riding) return;
+  if (Math.hypot(PLAYER.x - drive.x, PLAYER.y - drive.y) > 80) { jmMsg = "Walk to your car and press V."; return; }
+  drive.on = true; garagePanel.hidden = true; jmMsg = "Driving. W go, S brake or reverse, A and D steer. V gets you out.";
+}
+function driveStep(dt) {
+  const acc = keys.has("up") ? 1 : keys.has("down") ? -0.7 : 0, top = 130 * drive.speed;
+  drive.v += acc * 260 * dt;
+  if (!acc) drive.v *= Math.pow(0.35, dt);
+  drive.v = Math.max(-top * 0.4, Math.min(top, drive.v));
+  const steer = (keys.has("left") ? 1 : 0) - (keys.has("right") ? 1 : 0);
+  drive.a += steer * 2.4 * Math.min(1, Math.abs(drive.v) / 60) * Math.sign(drive.v) * dt;
+  const nx = drive.x + Math.sin(drive.a) * drive.v * dt, ny = drive.y + Math.cos(drive.a) * drive.v * dt;
+  if (free(nx, ny, CARBODY)) { drive.x = nx; drive.y = ny; } else drive.v *= -0.2;
+  PLAYER.x = drive.x; PLAYER.y = drive.y;
+  drive.mesh.position.set(drive.x, 0, drive.y); drive.mesh.rotation.y = drive.a;
+}
+loadGarage();
+
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
 function action() {
-  if (PLAYER.riding) return;
+  if (PLAYER.riding || drive.on) return;
   const s = nearestStop();
   if (s >= 0) {
     if (jmState.mode === "parked" && jmState.at === s && Math.hypot(PLAYER.x - jm.position.x, PLAYER.y - jm.position.z) < 90) { boardJM(); return; }
@@ -673,6 +972,9 @@ window.addEventListener("keydown", (e) => {
   if (KEYMAP[k]) { keys.add(KEYMAP[k]); e.preventDefault(); }
   if (k === "e") action();
   if (k === "n") setNight(!night);
+  if (k === "v") toggleCar();
+  if (k === "g") toggleGarage();
+  if (k === "escape") garagePanel.hidden = true;
   if (PLAYER.riding && k >= "1" && k <= "4") { const b = ridePanel.querySelectorAll("button")[Number(k) - 1]; if (b) b.click(); }
 });
 window.addEventListener("keyup", (e) => { const k = e.key.toLowerCase(); if (KEYMAP[k]) keys.delete(KEYMAP[k]); });
@@ -697,8 +999,9 @@ resize();
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  // walking
-  if (!PLAYER.riding) {
+  // driving, or walking
+  if (drive.on) driveStep(dt);
+  else if (!PLAYER.riding) {
     let dx = 0, dy = 0;
     if (keys.has("left")) dx -= 1;
     if (keys.has("right")) dx += 1;
@@ -719,13 +1022,14 @@ function frame(now) {
   updateJM(dt);
   updateCars(dt);
   updatePeds(dt);
+  updateLandscape(dt, now);
   drawMini(now);
   // draw the player
   player3.position.set(PLAYER.x, 0, PLAYER.y);
   player3.rotation.y = PLAYER.face;
   const sw = Math.sin(PLAYER.step) * 0.7, u = player3.userData;
   if (u.legL) { u.legL.rotation.x = sw; u.legR.rotation.x = -sw; }
-  if (PLAYER.riding) { player3.visible = false; } else player3.visible = true;
+  player3.visible = !(PLAYER.riding || drive.on);
   // camera
   cam.x += (PLAYER.x - cam.x) * Math.min(1, dt * 8);
   cam.y += (PLAYER.y - cam.y) * Math.min(1, dt * 8);
@@ -740,7 +1044,10 @@ function frame(now) {
   if (!text) {
     const s = nearestStop();
     const door = nearestDoor();
-    if (PLAYER.riding) text = "Riding the Joelmobile.";
+    if (drive.on) text = "Driving. V to get out.";
+    else if (PLAYER.riding) text = "Riding the Joelmobile.";
+    else if (drive.mesh && Math.hypot(PLAYER.x - drive.x, PLAYER.y - drive.y) < 80) text = "Press V to get in your car";
+    else if (nearCarPark() && !door) text = "Press G to see the cars for sale";
     else if (s >= 0 && jmState.mode === "parked" && jmState.at === s && Math.hypot(PLAYER.x - jm.position.x, PLAYER.y - jm.position.z) < 90) text = "Press E to get on the Joelmobile";
     else if (s >= 0) text = `Press E to call the Joelmobile to the ${STOPS[s].name.split(" (")[0].toLowerCase()}`;
     else if (door) text = door.runway ? "Press E to visit Octee Airlines" : `Press E to go into ${door.name}`;
@@ -752,4 +1059,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // For tests: lets a script read where you are and what the Joelmobile is doing.
-window.__walk = { PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
+window.__walk = { free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
