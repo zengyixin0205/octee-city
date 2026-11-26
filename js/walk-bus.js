@@ -255,6 +255,8 @@ const named = (l, name) => Object.assign(l, { name });
     action() { if (!panel.hidden && panelKind) { close(); return true; } if (S.ride) return alight(); return board(); },
     showArrivals, showRoutes, close,
     get panelOpen() { return !panel.hidden; },
+    boardable() { if (S.ride) return true; const st = stopNear(70); return !!st && buses.some((x) => x.state === "dwell" && r2stop(x) === st); },
+    nearStop: () => !!stopNear(70),
     prompt() {
       if (S.ride) { const b = S.ride; return b.state === "dwell" ? `Bus ${b.r.no}: stopped at ${r2stop(b).name}. Press E to get off.` : `Bus ${b.r.no} ${b.r.name}. Next stop: ${b.r.stops[b.si].stop.name}`; }
       const st = stopNear(70); if (!st) return "";

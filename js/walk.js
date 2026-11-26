@@ -1224,7 +1224,7 @@ inside = createInside({ THREE, scene, mat, label, makeFigure, PLAYER, stage, B, 
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
 function action() {
   if (inside.on) { inside.action(); return; }
-  if (busApi.action()) return;
+  if ((busApi.panelOpen || busApi.boardable()) && busApi.action()) return;
   if (PLAYER.riding || drive.on) return;
   const s = nearestStop();
   if (s >= 0) {
@@ -1232,6 +1232,7 @@ function action() {
     callJM(s); return;
   }
   const door = nearestDoor();
+  if (!door && busApi.nearStop()) { busApi.action(); return; }
   if (door) { if (inside.canEnter(door)) inside.enter(door); else location.href = door.href ? door.href : "index.html#" + door.id; }
 }
 window.addEventListener("keydown", (e) => {
@@ -1330,7 +1331,7 @@ function frame(now) {
   // the prompt
   let text = jmMsg;
   if (!text && inside.on) text = inside.prompt();
-  else if (!text && busApi.prompt()) text = busApi.prompt();
+  else if (!text && busApi.prompt() && (busApi.boardable() || !nearestDoor())) text = busApi.prompt();
   else if (!text) {
     const s = nearestStop();
     const door = nearestDoor();
