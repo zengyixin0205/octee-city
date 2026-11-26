@@ -106,7 +106,21 @@ const MOUNTAINS = (() => {
 })();
 // Things you cannot walk through out there: hills, mountains and lakes (the river is shallow).
 const HIKE_BLOCK = { x: HIKE.x, y: HIKE.y, r: HIKE.r * 0.93 };
-const BLOCKERS = [HIKE_BLOCK, ...WILD.hills.map((h) => ({ x: h.x, y: h.y, r: h.r * 0.7 })), ...MOUNTAINS.map((m) => ({ x: m.x, y: m.y, r: m.r * 0.6 })), ...WILD.lakes];
+// Solid out to most of the slope, so you stop at the foot of a hill or mountain instead of walking into it.
+const BLOCKERS = [HIKE_BLOCK, ...WILD.hills.map((h) => ({ x: h.x, y: h.y, r: h.r * 0.92 })), ...MOUNTAINS.map((m) => ({ x: m.x, y: m.y, r: m.r * 0.88 })), ...WILD.lakes];
+// Tunnels: wherever the ground is higher than the highway deck, the highway goes through the hill in a tunnel.
+const TUN_CROWN = HWY_H + 26;
+const moundTop = (o, x, y) => { const d = Math.hypot(x - o.x, y - o.y) / o.r; return d >= 1 ? 0 : o.h * Math.pow(1 - d * d, o.power) * (1 + (o.noise || 0) * 0.6); };
+const HWY_TUN = (() => {
+  const n = HWY.length, all = [...WILD.hills, ...MOUNTAINS, HIKE], t = HWY.map((q, i) => {
+    const a = HWY[(i + n - 1) % n], b = HWY[(i + 1) % n]; let dx = b[0] - a[0], dz = b[1] - a[1]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    return [-26, 0, 26].some((off) => all.some((o) => moundTop(o, q[0] + dz * off, q[1] - dx * off) > HWY_H + 2));
+  });
+  return t.map((_, i) => [-2, -1, 0, 1, 2].some((k) => t[(i + k + n) % n]));
+})();
+const TUN_PTS = HWY.filter((_, i) => HWY_TUN[i]);
+const TUNNEL_MESHES = [];
+let tunnelXray = false;
 function distSeg2(px, py, a, b) {
   const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)));
   return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
@@ -231,7 +245,7 @@ function free(px, py, body = BODY, gy = PLAYER.gy) {
   const tr = trailAt(px, py, gy);                 // on the hiking trail you may go beyond the edge, and past the mountain's foot
   if (!tr && gy > 12) return false;               // up on the highway or a ramp you cannot step off the edge
   if (!tr && (box.x < -OUT || box.y < -OUT || box.x + box.w > W + OUT || box.y + box.h > H + OUT)) return false;
-  for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) { if (tr && tr.hike && c === HIKE_BLOCK) continue; return false; }
+  if (!(tr && !tr.hike)) for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) { if (tr && tr.hike && c === HIKE_BLOCK) continue; return false; }
   for (const j of JUMPS) if (hit(box, j) && PLAYER.hop < j.hz) return false;
   return !SOLID.some((s) => hit(box, s));
 }
@@ -1052,12 +1066,17 @@ function mound(o) {
   const geo = new THREE.PlaneGeometry(2 * o.r, 2 * o.r, segs, segs);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+  const carve = o.h > TUN_CROWN && TUN_PTS.some((q) => Math.hypot(q[0] - o.x, q[1] - o.y) < o.r + 80);
   for (let i = 0; i < pos.count; i++) {
     const px = pos.getX(i), pz = pos.getZ(i), d = Math.hypot(px, pz) / o.r;
     let hh = -0.6;
     if (d < 1) {
       const n = (vnoise(px / 45 + o.seed, pz / 45 + o.seed) - 0.5) * o.noise * 2 + (vnoise(px / 14 + o.seed, pz / 14) - 0.5) * o.noise * 0.6;
       hh = Math.max(-0.6, moundH(o, d) * (1 + n));
+      if (carve && hh > TUN_CROWN) {                                   // bore the highway through: the ground over the tunnel is flattened to the roof
+        let dm = 1e9; for (const q of TUN_PTS) { const dd = Math.hypot(o.x + px - q[0], o.y + pz - q[1]); if (dd < dm) dm = dd; }
+        if (dm < 72) { const w = Math.min(1, Math.max(0, (dm - 34) / 38)); hh = Math.min(hh, TUN_CROWN + (hh - TUN_CROWN) * w); }
+      }
     }
     pos.setY(i, hh);
     const t = o.h ? Math.max(0, hh) / o.h : 0;
@@ -1069,6 +1088,7 @@ function mound(o) {
   geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 }));
   m.position.set(o.x, 0, o.y); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  if (carve) TUNNEL_MESHES.push(m);
 }
 for (const h of WILD.hills) mound(h);
 for (const m of MOUNTAINS) mound(m);
@@ -1256,7 +1276,7 @@ function driveStep(dt) {
 loadGarage();
 
 // The trail up the big mountain, the highway round the town, and its bridges (walk-world.js)
-createWorld({ THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H });
+createWorld({ HWY_TUN, TUN_CROWN, THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H });
 
 // The buses (walk-bus.js)
 mario = createMario({ THREE, scene, mat, PLAYER, TRAIL, TRAIL_W, HIKE, JUMPS, stage, loggedIn: () => !!(cloudMod && cloudMod.cloudLinked()), cloudPlay: (score) => carApi("POST", "/api/city/play", { game: "hike", score }) });
@@ -1352,6 +1372,8 @@ function frame(now) {
     PLAYER.z = PLAYER.gy + PLAYER.hop; }
   busApi.update(dt);
   mario.update(dt, now);
+  { const inTun = PLAYER.gy > 30 && TUN_PTS.some((q) => Math.hypot(PLAYER.x - q[0], PLAYER.y - q[1]) < 44);
+    if (inTun !== tunnelXray) { tunnelXray = inTun; for (const m of TUNNEL_MESHES) { m.material.transparent = inTun; m.material.opacity = inTun ? 0.2 : 1; m.material.depthWrite = !inTun; m.material.needsUpdate = true; } } }
   updateJM(dt);
   updateCars(dt);
   updatePeds(dt);
@@ -1397,4 +1419,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // For tests: lets a script read where you are and what the Joelmobile is doing.
-window.__walk = { mario, busApi, TRAIL, groundAt, inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
+window.__walk = { HWY_TUN, TUN_PTS, TUNNEL_MESHES, mario, busApi, TRAIL, groundAt, inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };

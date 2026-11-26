@@ -1,7 +1,7 @@
 // The big outdoors: the hiking trail up the biggest mountain (steps, lights, logs to jump over, a summit), and the highway
 // that goes all the way round the town on pillars, with cars on it and arched bridges where it crosses the rivers.
 export function createWorld(ctx) {
-  const { THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H } = ctx;
+  const { THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RAMPS, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H, HWY_TUN, TUN_CROWN } = ctx;
 
   // ---- the hiking trail ----
   {
@@ -69,7 +69,8 @@ export function createWorld(ctx) {
     for (let i = 0; i < HWY.length; i++) {
       const a = HWY[i], b = HWY[(i + 1) % HWY.length], sl = Math.hypot(b[0] - a[0], b[1] - a[1]);
       acc += sl;
-      if (acc >= 56) {
+      if (acc >= 56 && HWY_TUN[i]) acc = 0;                                    // no pillars or lamps inside a tunnel
+      else if (acc >= 56) {
         acc = 0; if (np < pil.count) { dm.position.set(a[0], (HWY_H - 6) / 2 - 0.5, a[1]); dm.rotation.set(0, Math.atan2(b[0] - a[0], b[1] - a[1]) - Math.PI / 2 + Math.PI / 2, 0); dm.scale.set(1, 1, 1); dm.updateMatrix(); pil.setMatrixAt(np++, dm.matrix); }
         if (lampN++ % 2 === 0) { const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; addLamp(a[0] + (dz / l) * 20, a[1] - (dx / l) * 20, HWY_H + 6); }
       }
@@ -83,6 +84,29 @@ export function createWorld(ctx) {
       const g = makeCar(cols[(i * 3 + n) % cols.length]);
       if (i % 4 === 3) g.scale.set(1.15, 1.6, 2.1);                             // a lorry
       cars.push({ g, route, s: (i / n) * route.L, v: 0, vmax: vmax * (0.9 + (i % 3) * 0.06), hd: 0, elev: HWY_H + 0.2, hw: true });
+    }
+    // tunnels: an arched concrete tube round the deck wherever the highway goes through a hill, with a lit roof and a frame at each mouth
+    {
+      const n = HWY.length, hd = (i) => { const a = HWY[(i + n - 1) % n], b = HWY[(i + 1) % n]; let dx = b[0] - a[0], dz = b[1] - a[1]; const l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
+      const AR = 26, AH = TUN_CROWN - HWY_H - 4, K = 10;
+      const concrete = new THREE.MeshStandardMaterial({ color: "#8d8a82", roughness: 0.95, side: THREE.DoubleSide });
+      const lightM = new THREE.MeshBasicMaterial({ color: "#ffe6a0" });
+      let count = 0;
+      for (let st = 0; st < n; st++) {
+        if (!HWY_TUN[st] || HWY_TUN[(st + n - 1) % n]) continue;               // the first sample of a tunnel
+        const idxs = []; for (let k = 0; k < n && HWY_TUN[(st + k) % n]; k++) idxs.push((st + k) % n);
+        const pos = [], idx = [];
+        idxs.forEach((i) => { const [dx, dz] = hd(i), q = HWY[i]; for (let j = 0; j <= K; j++) { const th = (j / K) * Math.PI; pos.push(q[0] + dz * Math.cos(th) * AR, HWY_H + 1 + Math.sin(th) * AH, q[1] - dx * Math.cos(th) * AR); } });
+        for (let r = 0; r + 1 < idxs.length; r++) for (let j = 0; j < K; j++) { const a = r * (K + 1) + j, b = (r + 1) * (K + 1) + j; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+        const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+        const tube = new THREE.Mesh(g, concrete); tube.receiveShadow = true; scene.add(tube);
+        for (let r = 1; r + 1 < idxs.length; r += 2) { const [dx, dz] = hd(idxs[r]), q = HWY[idxs[r]]; const lm = new THREE.Mesh(new THREE.BoxGeometry(14, 1, 3), lightM); lm.position.set(q[0], HWY_H + 1 + AH - 1.5, q[1]); lm.rotation.y = Math.atan2(dx, dz) + Math.PI / 2; scene.add(lm); }
+        for (const ei of [idxs[0], idxs[idxs.length - 1]]) {
+          const [dx, dz] = hd(ei), q = HWY[ei];
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(AR + 1, 3, 8, 28, Math.PI), mat("#b9b4a6")); ring.scale.y = AH / AR; ring.position.set(q[0], HWY_H + 1, q[1]); ring.rotation.y = Math.atan2(dx, dz); ring.castShadow = true; scene.add(ring);
+        }
+        const mid = HWY[idxs[0]], sl = label("Tunnel " + (++count), { size: 36 }); sl.position.set(mid[0], HWY_H + AH + 18, mid[1]); scene.add(sl);
+      }
     }
     // the ramps: a slope up from the ring road to the highway, with walls on both sides and a sign at the bottom
     for (const r of RAMPS) {
