@@ -2,12 +2,14 @@
 // Everything is drawn in code: no photos. The map is hand-placed and not symmetrical.
 import * as THREE from "three";
 import { createInside } from "./walk-inside.js";
+import { createWorld } from "./walk-world.js";
+import { createBus } from "./walk-bus.js";
 // The cloud is only needed to buy a car. The walk works without it.
 let CFG = null, cloudMod = null;
 try { CFG = (await import("./config.js")).CONFIG; cloudMod = await import("./cloud.js"); } catch { /* no cloud: the walk still works */ }
 
-let inside = null;                   // the shop interiors (see walk-inside.js), made once the scene exists
-const W = 1800, H = 1200;            // the town, in world units (1 unit is roughly a metre of a very small town)
+let inside = null, busApi = null;                   // the shop interiors (see walk-inside.js), made once the scene exists
+const W = 2600, H = 1200;            // the town, in world units (1 unit is roughly a metre of a very small town)
 
 // Buildings: a box on the ground (x, y = top-left in plan), its height, and its colours and extras.
 const B = [
@@ -36,6 +38,15 @@ const B = [
   { id: "pool", name: "Swimming Pool", x: 1100, y: 880, w: 190, h: 130, H: 18, body: "#7fd3e8", trim: "#1b6f86", roof: "none", water: true },
   { id: "market", name: "Night Market", x: 1380, y: 820, w: 200, h: 120, H: 26, body: "#ffb36b", trim: "#7a3b00", roof: "pitch", stalls: true },
   { id: "grocery", name: "Grocery Store", x: 1400, y: 1050, w: 170, h: 100, H: 40, body: "#cfe8c0", trim: "#2f6b2a", roof: "flat", stripes: true },
+  { id: "terminal", name: "Octee Central Bus Terminal", x: 2125, y: 765, w: 370, h: 140, H: 46, body: "#dfe6ee", trim: "#c62828", roof: "flat" },
+  { id: "blk101", name: "Blk 101", x: 1760, y: 90, w: 90, h: 200, H: 118, body: "#f2d7d5", trim: "#9c4a46", roof: "flat" },
+  { id: "blk102", name: "Blk 102", x: 1880, y: 90, w: 90, h: 200, H: 118, body: "#d5e8f2", trim: "#3f6f8f", roof: "flat" },
+  { id: "blk103", name: "Blk 103", x: 2010, y: 120, w: 100, h: 170, H: 96, body: "#f6ecc9", trim: "#8f7a2f", roof: "flat" },
+  { id: "mall", name: "Octee Mall", x: 2200, y: 90, w: 260, h: 170, H: 60, body: "#e9d9f2", trim: "#6a3f8a", roof: "flat" },
+  { id: "sports", name: "East Sports Hall", x: 2200, y: 320, w: 200, h: 120, H: 44, body: "#d9f2e3", trim: "#2f8a5a", roof: "flat" },
+  { id: "blk104", name: "Blk 104", x: 1780, y: 625, w: 90, h: 180, H: 104, body: "#f2e0d5", trim: "#9a5a3a", roof: "flat" },
+  { id: "blk105", name: "Blk 105", x: 1900, y: 625, w: 90, h: 180, H: 104, body: "#e2f2d5", trim: "#4f8f3a", roof: "flat" },
+  { id: "hotel", name: "Octee Hotel", x: 1780, y: 850, w: 230, h: 110, H: 74, body: "#d9dff2", trim: "#3a4a9a", roof: "flat" },
   { id: "lounge", name: "Platinum Lounge", x: 1120, y: 1040, w: 160, h: 100, H: 44, body: "#d9d4ee", trim: "#4b3f7a", roof: "flat", gold: true },
 ];
 // The airport: a long terminal, a runway and a control tower. You can walk in through its door to the Octee Airlines site.
@@ -43,28 +54,85 @@ const FIA = { id: "fia", name: "FIA airport", x: 910, y: 40, w: 760, h: 200, H: 
 const SOLID = [...B, FIA];
 
 // The countryside beyond the ring road: you can walk out to OUT units past the edge of town.
-const OUT = 420;
+const OUT = 560;
 const WILD = {
   hills: [
     { x: -300, y: 300, r: 150, h: 130, power: 1.5, noise: 0.04, seed: 3 },   // the hill with the waterfall
-    { x: 400, y: 1420, r: 150, h: 75, power: 1.4, noise: 0.14, seed: 5 },
+    { x: 400, y: H + 240, r: 150, h: 75, power: 1.4, noise: 0.14, seed: 5 },
     { x: W + 260, y: 380, r: 170, h: 85, power: 1.4, noise: 0.14, seed: 9 },
     { x: W + 300, y: 930, r: 130, h: 60, power: 1.4, noise: 0.14, seed: 11 },
   ],
-  lakes: [{ x: -95, y: 300, r: 60 }, { x: -105, y: 790, r: 38 }, { x: 1000, y: 1350, r: 120 }],
+  lakes: [{ x: -95, y: 300, r: 60 }, { x: -105, y: 790, r: 38 }, { x: 1000, y: H + 170, r: 120 }, { x: 2120, y: -40, r: 46 }, { x: 800, y: H + 40, r: 50 }],
 };
 const RIVER = [[-95, 360], [-100, 430], [-85, 520], [-100, 610], [-90, 700], [-105, 760]];
-const MOUNTAINS = [
-  { x: 100, y: -260, r: 200, h: 260, seed: 21 }, { x: 520, y: -270, r: 170, h: 200, seed: 22 }, { x: 900, y: -280, r: 230, h: 310, seed: 23 },
-  { x: 1380, y: -265, r: 180, h: 230, seed: 24 }, { x: 1700, y: -270, r: 210, h: 280, seed: 25 }, { x: W + 330, y: 120, r: 170, h: 220, seed: 26 },
-].map((m) => ({ ...m, power: 1.05, noise: 0.5, snow: true }));
+// Two rivers that run under the highway: the highway crosses them on bridges.
+const RIVER_N = [[2150, -560], [2120, -470], [2160, -390], [2130, -300], [2150, -190], [2120, -90]];
+const RIVER_S = [[800, H + 560], [830, H + 450], [790, H + 300], [820, H + 190], [800, H + 90]];
+const RIVERS = [RIVER, RIVER_N, RIVER_S];
+// The highway: a rounded rectangle round the whole town, up on pillars, so you can see it from the hills.
+const HWY_OFF = 300, HWY_H = 40;
+const HWY = (() => {
+  const x0 = -HWY_OFF, x1 = W + HWY_OFF, y0 = -HWY_OFF, y1 = H + HWY_OFF, R = 190, P = [];
+  const line = (a, b, c, d) => { const n = Math.max(1, Math.round(Math.hypot(c - a, d - b) / 24)); for (let i = 0; i <= n; i++) P.push([a + ((c - a) * i) / n, b + ((d - b) * i) / n]); };
+  const arc = (cx, cy, a0, a1) => { for (let i = 0; i <= 14; i++) { const a = a0 + ((a1 - a0) * i) / 14; P.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]); } };
+  line(x0 + R, y0, x1 - R, y0); arc(x1 - R, y0 + R, -Math.PI / 2, 0); line(x1, y0 + R, x1, y1 - R); arc(x1 - R, y1 - R, 0, Math.PI / 2);
+  line(x1 - R, y1, x0 + R, y1); arc(x0 + R, y1 - R, Math.PI / 2, Math.PI); line(x0, y1 - R, x0, y0 + R); arc(x0 + R, y0 + R, Math.PI, Math.PI * 1.5);
+  const out = []; for (const q of P) { const l = out[out.length - 1]; if (l && Math.hypot(q[0] - l[0], q[1] - l[1]) < 1) continue; out.push(q); }
+  if (Math.hypot(out[0][0] - out[out.length - 1][0], out[0][1] - out[out.length - 1][1]) < 1) out.pop();
+  return out;
+})();
+function nearHighway(x, y, d = 34) { for (const q of HWY) if (Math.abs(q[0] - x) < d && Math.abs(q[1] - y) < d && Math.hypot(q[0] - x, q[1] - y) < d) return true; return false; }
+// The hiking mountain: the biggest, to the north. A spiral trail with steps climbs it (see TRAIL below).
+const HIKE = { x: 1100, y: -1280, r: 850, h: 1100, power: 2.2, noise: 0, seed: 31, snow: true, hike: true };
+// The mountains: a closed ring of big peaks all the way round the town, so there are no gaps, with a second row behind.
+const MOUNTAINS = (() => {
+  const out = [], rr = (seed) => { let t = seed; return () => { t = (t * 16807) % 2147483647; return t / 2147483647; }; }, rnd = rr(77);
+  const rect = (off, step, rMin, rMax, hMin, hMax, tag) => {
+    const x0 = -off, x1 = W + off, y0 = -off, y1 = H + off, pts = [];
+    for (let x = x0; x < x1; x += step) pts.push([x, y0]);
+    for (let y = y0; y < y1; y += step) pts.push([x1, y]);
+    for (let x = x1; x > x0; x -= step) pts.push([x, y1]);
+    for (let y = y1; y > y0; y -= step) pts.push([x0, y]);
+    for (const [x, y] of pts) {
+      if (Math.hypot(x - HIKE.x, y - HIKE.y) < HIKE.r * 0.95) continue;
+      const k = rnd();
+      out.push({ x: x + (rnd() - 0.5) * 60, y: y + (rnd() - 0.5) * 60, r: rMin + k * (rMax - rMin), h: hMin + rnd() * (hMax - hMin), seed: 100 + out.length, tag });
+    }
+  };
+  rect(780, 210, 320, 420, 300, 560, "front");
+  rect(1250, 330, 430, 560, 520, 800, "back");
+  return out.map((m) => ({ ...m, power: 1.05, noise: 0.5, snow: true }));
+})();
 // Things you cannot walk through out there: hills, mountains and lakes (the river is shallow).
-const BLOCKERS = [...WILD.hills.map((h) => ({ x: h.x, y: h.y, r: h.r * 0.7 })), ...MOUNTAINS.map((m) => ({ x: m.x, y: m.y, r: m.r * 0.6 })), ...WILD.lakes];
+const HIKE_BLOCK = { x: HIKE.x, y: HIKE.y, r: HIKE.r * 0.93 };
+const BLOCKERS = [HIKE_BLOCK, ...WILD.hills.map((h) => ({ x: h.x, y: h.y, r: h.r * 0.7 })), ...MOUNTAINS.map((m) => ({ x: m.x, y: m.y, r: m.r * 0.6 })), ...WILD.lakes];
 function distSeg2(px, py, a, b) {
   const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)));
   return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
 }
 
+// The hiking trail: a spiral that climbs the mountain 1.9 times round. Each point has its height; you walk on the steps.
+const hikeH = (d) => (d >= 1 ? 0 : HIKE.h * Math.pow(1 - d * d, HIKE.power));
+const TRAIL = (() => {
+  const pts = [], N = 950;
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, d = 0.945 - 0.885 * Math.pow(u, 0.92), a = Math.PI / 2 - u * Math.PI * 2 * 1.9;
+    const x = HIKE.x + Math.cos(a) * d * HIKE.r, y = HIKE.y + Math.sin(a) * d * HIKE.r;
+    pts.push({ x, y, h: hikeH(d), a });
+  }
+  return pts;
+})();
+const TRAIL_W = 13;                                // half the width of the path
+function trailAt(px, py) {
+  if (Math.hypot(px - HIKE.x, py - HIKE.y) > HIKE.r * 1.02) return null;
+  let bi = -1, bd = TRAIL_W * TRAIL_W;
+  for (let i = 0; i < TRAIL.length; i++) { const dx = px - TRAIL[i].x, dy = py - TRAIL[i].y, d = dx * dx + dy * dy; if (d < bd) { bd = d; bi = i; } }
+  return bi < 0 ? null : { i: bi, h: TRAIL[bi].h };
+}
+const groundAt = (px, py) => { const t = trailAt(px, py); return t ? t.h + 1.5 : 0; };
+// Logs across the trail: too high to walk through, so press Space to jump over them.
+const JUMPS = [];
+for (const i of [150, 300, 430, 560, 690, 800, 880]) { const t = TRAIL[i]; JUMPS.push({ x: t.x - 9, y: t.y - 9, w: 18, h: 18, hz: 12, a: t.a, cx: t.x, cy: t.y, h0: t.h }); }
 // Extra roads, as segments [x1, y1, x2, y2]. A K joins the main street, and an F joins the south street.
 const ROAD_W = 22;
 // Our own road layout: a roundabout north-east of the main street, with three roads leading off it.
@@ -91,6 +159,9 @@ function segDist(px, py, [x1, y1, x2, y2]) {
 // Extra roads: one side road from the main street down to the south street. The K and F roads are gone.
 const ROAD_NET = [
   { a: [1650, 560], b: [1650, 1000], w: 24 },
+  { a: [2310, 562], b: [2310, 727], w: 26 },                       // the link road down to the bus terminal
+  { a: [2087, 727], b: [2533, 727], w: 34 }, { a: [2087, 933], b: [2533, 933], w: 34 },     // the terminal's loop road
+  { a: [2087, 727], b: [2087, 933], w: 34 }, { a: [2533, 727], b: [2533, 933], w: 34 },
 ];
 function distToSeg(px, py, r) {
   const [ax, ay] = r.a, [bx, by] = r.b, dx = bx - ax, dy = by - ay;
@@ -100,17 +171,31 @@ function distToSeg(px, py, r) {
 
 // The ring road goes all the way round the town, on the outside edges. Stops sit on it, and the Joelmobile drives it.
 const BAND = 36, RC = 18;                       // band width, and the centre line of the ring road
-const RL = W - 2 * RC, RH = H - 2 * RC;        // lengths of the top/bottom and left/right sides
-const LOOP = 2 * RL + 2 * RH;                   // the whole way round
+const RING = (() => {                           // the ring road's centre line, clockwise, with rounded corners (radius 42 round points 60 in)
+  const P = [], R = 42, C = 60;
+  const arc = (cx, cy, a0, a1) => { for (let i = 0; i <= 12; i++) { const a = a0 + ((a1 - a0) * i) / 12; P.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]); } };
+  const line = (x1, y1, x2, y2) => { const n = Math.max(1, Math.round(Math.hypot(x2 - x1, y2 - y1) / 20)); for (let i = 0; i <= n; i++) P.push([x1 + ((x2 - x1) * i) / n, y1 + ((y2 - y1) * i) / n]); };
+  line(C, RC, W - C, RC); arc(W - C, C, -Math.PI / 2, 0);
+  line(W - RC, C, W - RC, H - C); arc(W - C, H - C, 0, Math.PI / 2);
+  line(W - C, H - RC, C, H - RC); arc(C, H - C, Math.PI / 2, Math.PI);
+  line(RC, H - C, RC, C); arc(C, C, Math.PI, Math.PI * 1.5);
+  const pts = [], cum = [];
+  for (const q of P) { const l = pts[pts.length - 1]; if (l && Math.hypot(q[0] - l[0], q[1] - l[1]) < 0.5) continue; pts.push(q); }
+  const f = pts[0], l = pts[pts.length - 1]; if (Math.hypot(f[0] - l[0], f[1] - l[1]) < 0.5) pts.pop();
+  let tot = 0; for (let i = 0; i < pts.length; i++) { cum.push(tot); const n = pts[(i + 1) % pts.length]; tot += Math.hypot(n[0] - pts[i][0], n[1] - pts[i][1]); }
+  return { pts, cum, L: tot };
+})();
+const LOOP = RING.L;                            // the whole way round
+function ringS(x, y) { let bi = 0, bd = 1e12; RING.pts.forEach((q, i) => { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d < bd) { bd = d; bi = i; } }); return RING.cum[bi]; }
 // Stops: name, a point on the sidewalk (where you stand), and its place on the ring (distance round the loop).
 const STOPS = [
-  { name: "North stop (Clinic side)", x: 820, y: 60, s: (820 - RC) },
-  { name: "East stop (Market side)", x: 1744, y: 760, s: RL + (760 - RC) },
-  { name: "South stop (Harbour side)", x: 520, y: 1140, s: RL + RH + (W - RC - 520) },
-  { name: "West stop (Tax side)", x: 56, y: 560, s: RL + RH + RL + (H - RC - 560) },
-];
+  { name: "North stop (Clinic side)", x: 820, y: 60 },
+  { name: "East stop (Market side)", x: W - 56, y: 760 },
+  { name: "South stop (Harbour side)", x: 520, y: 1140 },
+  { name: "West stop (Tax side)", x: 56, y: 560 },
+].map((st) => ({ ...st, s: ringS(st.x, st.y) }));
 const SPEED = 230;                              // the Joelmobile, in world units a second
-const PLAYER = { x: 960, y: 580, step: 0, riding: false, face: 0 };
+const PLAYER = { x: 960, y: 580, step: 0, riding: false, face: 0, hop: 0, vh: 0, gy: 0, z: 0 };
 const keys = new Set();
 const BODY = { w: 18, h: 14 };                 // the player's feet, for walls
 
@@ -119,16 +204,24 @@ const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a
 function free(px, py, body = BODY) {
   if (inside && inside.on) return inside.free(px, py, body);
   const box = { x: px - body.w / 2, y: py - body.h / 2, w: body.w, h: body.h };
-  if (box.x < -OUT || box.y < -OUT || box.x + box.w > W + OUT || box.y + box.h > H + OUT) return false;
-  for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) return false;
+  const tr = trailAt(px, py);                     // on the hiking trail you may go beyond the edge, and past the mountain's foot
+  if (!tr && (box.x < -OUT || box.y < -OUT || box.x + box.w > W + OUT || box.y + box.h > H + OUT)) return false;
+  for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) { if (tr && c === HIKE_BLOCK) continue; return false; }
+  for (const j of JUMPS) if (hit(box, j) && PLAYER.hop < j.hz) return false;
   return !SOLID.some((s) => hit(box, s));
 }
 function ringPoint(s) {                          // where the ring road is at distance s round the loop
   s = ((s % LOOP) + LOOP) % LOOP;
-  if (s < RL) return { x: RC + s, y: RC, dx: 1, dy: 0 };
-  if (s < RL + RH) return { x: W - RC, y: RC + (s - RL), dx: 0, dy: 1 };
-  if (s < 2 * RL + RH) return { x: W - RC - (s - RL - RH), y: H - RC, dx: -1, dy: 0 };
-  return { x: RC, y: H - RC - (s - 2 * RL - RH), dx: 0, dy: -1 };
+  const c = RING.cum; let lo = 0, hi = c.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (c[m] <= s) lo = m; else hi = m - 1; }
+  const a = RING.pts[lo], b = RING.pts[(lo + 1) % RING.pts.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, t = (s - c[lo]) / len;
+  return { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, dx: (b[0] - a[0]) / len, dy: (b[1] - a[1]) / len };
+}
+// A lane along the ring: from s0, len long, shifted `out` to the outside (left of clockwise traffic). A negative len goes anticlockwise.
+function ringLane(s0, len, out = 0) {
+  const pts = [], n = Math.max(2, Math.ceil(Math.abs(len) / 14));
+  for (let i = 0; i <= n; i++) { const p = ringPoint(s0 + (len * i) / n), sg = Math.sign(len) || 1; pts.push([p.x + p.dy * out * sg, p.y - p.dx * out * sg]); }
+  return pts;
 }
 function forwardDist(from, to) { return ((to - from) % LOOP + LOOP) % LOOP; }
 function nearestDoor() {
@@ -228,7 +321,8 @@ function label(text, { bg = "rgba(255,255,255,.94)", fg = "#222", size = 40 } = 
 }
 
 // Ground and roads
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 3000, H + 3000), mat("#7db45c", { map: grassTex }));
+grassTex.repeat.set((W + 7000) / 34, (H + 7000) / 34);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(W + 7000, H + 7000), mat("#7db45c", { map: grassTex }));
 ground.rotation.x = -Math.PI / 2; ground.position.set(W / 2, -0.2, H / 2); ground.receiveShadow = true;
 scene.add(ground);
 function road(x, y, w, h, tex) {
@@ -294,12 +388,61 @@ SEGS.forEach(([x1, y1, x2, y2], i) => { if (i >= RING_PIECES) roadSeg(x1, y1, x2
 }
 road(0, 500, W, 70, ROAD_H);                          // main street
 road(0, 1002, W, 32, ROAD_H);                         // south street
-road(0, 0, W, BAND, ROAD_H); road(0, H - BAND, W, BAND, ROAD_H);   // ring, top and bottom
-road(0, 0, BAND, H, ROAD_V); road(W - BAND, 0, BAND, H, ROAD_V);   // ring, left and right
-// pavements on the ring's inner edge
-for (const [x, y, w, h] of [[BAND, BAND, W - 2 * BAND, 10], [BAND, H - BAND - 10, W - 2 * BAND, 10], [BAND, BAND, 10, H - 2 * BAND], [W - BAND - 10, BAND, 10, H - 2 * BAND]]) {
-  const p = new THREE.Mesh(new THREE.BoxGeometry(w, 1.2, h), mat("#c9c4b8"));
-  p.position.set(x + w / 2, 0.6, y + h / 2); p.receiveShadow = true; scene.add(p);
+// The ring road: one smooth ribbon with rounded corners, a pavement on the inside, and dashes down the middle.
+function ribbonGeo(path, half, y, closed = true) {
+  const n = path.length, pos = [], nor = [], idx = [];
+  for (let i = 0; i < n; i++) {
+    const a = path[closed ? (i - 1 + n) % n : Math.max(0, i - 1)], b = path[closed ? (i + 1) % n : Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dz = b[1] - a[1]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    const nx = dz, nz = -dx;                         // to the left of the way you are going
+    pos.push(path[i][0] + nx * half, y, path[i][1] + nz * half, path[i][0] - nx * half, y, path[i][1] - nz * half);
+    nor.push(0, 1, 0, 0, 1, 0);
+  }
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) { const j = (i + 1) % n; idx.push(i * 2, j * 2, i * 2 + 1, i * 2 + 1, j * 2, j * 2 + 1); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); geo.setIndex(idx);
+  return geo;
+}
+function ribbon(path, half, y, color, opts = {}) {
+  const m = new THREE.Mesh(ribbonGeo(path, half, y, opts.closed !== false), new THREE.MeshStandardMaterial({ color, roughness: 0.95, side: THREE.DoubleSide, ...(opts.mat || {}) }));
+  m.receiveShadow = true; scene.add(m); return m;
+}
+function dashAlong(path, spacing, len, wid, color, y, closed = true) {
+  const mm = new THREE.InstancedMesh(new THREE.PlaneGeometry(len, wid), new THREE.MeshStandardMaterial({ color, roughness: 0.9 }), Math.ceil(2200 / spacing) + 400);
+  const d = new THREE.Object3D(); let cnt = 0, acc = 0;
+  const n = path.length;
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const a = path[i], b = path[(i + 1) % n], sl = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (let t = acc; t < sl; t += spacing) {
+      if (cnt >= mm.count) break;
+      const f = t / sl; d.position.set(a[0] + (b[0] - a[0]) * f, y, a[1] + (b[1] - a[1]) * f);
+      d.rotation.set(-Math.PI / 2, -Math.atan2(b[1] - a[1], b[0] - a[0]), 0, "YXZ");
+      d.updateMatrix(); mm.setMatrixAt(cnt++, d.matrix);
+    }
+    acc = (acc + Math.ceil((sl - acc) / spacing) * spacing) - sl;
+  }
+  mm.count = cnt; scene.add(mm); return mm;
+}
+const ringIn = (off) => RING.pts.map((p, i) => { const q = RING.pts[(i + 1) % RING.pts.length], r = RING.pts[(i - 1 + RING.pts.length) % RING.pts.length]; let dx = q[0] - r[0], dy = q[1] - r[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; return [p[0] + dy * off, p[1] - dx * off]; });
+ribbon(RING.pts, BAND / 2, 0.22, "#4b4f55");
+ribbon(ringIn(-(BAND / 2 + 5)), 5, 0.6, "#c9c4b8");                      // the pavement on the inner edge
+ribbon(ringIn(BAND / 2 - 2.5), 0.8, 0.28, "#e9e2b5");                     // edge lines
+ribbon(ringIn(-(BAND / 2 - 2.5)), 0.8, 0.28, "#e9e2b5");
+dashAlong(RING.pts, 30, 14, 1.6, "#e9e2b5", 0.3);
+// Fillets: the corner where a side road meets a bigger road is a curve, not a square corner.
+// (cx, cz) is the corner, (sx, sz) the way the curve opens out from it.
+const FILLET_MAT = new THREE.MeshStandardMaterial({ color: "#4b4f55", roughness: 0.95, side: THREE.DoubleSide });
+function fillet(cx, cz, sx, sz, r = 16) {
+  const pos = [0, 0.27, 0], N = 8;
+  const q = [[0, r]]; for (let i = 0; i <= N; i++) { const a = Math.PI + (Math.PI / 2) * (i / N); q.push([r + r * Math.cos(a), r + r * Math.sin(a)]); }
+  q.forEach(([a, b]) => pos.push(a * sx, 0.27, b * sz));
+  const idx = []; for (let i = 1; i < q.length; i++) idx.push(0, i, i + 1);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx.slice(0, (q.length - 1) * 3)); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, FILLET_MAT); m.position.set(cx, 0, cz); m.receiveShadow = true; scene.add(m);
+}
+{ // main street and south street meet the ring
+  for (const [x, sx] of [[BAND, 1], [W - BAND, -1]]) { fillet(x, 500, sx, -1); fillet(x, 570, sx, 1); fillet(x, 1002, sx, -1); fillet(x, 1034, sx, 1); }
 }
 
 // Buildings
@@ -392,12 +535,24 @@ function addFia(s) {
   // one plane that takes off along the runway, again and again
   const flyer = makePlane("#ffffff", 1.4); flyer.position.set(s.x + 30, 0, s.y + 221); g.add(flyer);
   fiaPlanes.push({ m: flyer, x0: s.x + 30, x1: s.x + s.w - 30, z: s.y + 221, t: 0 });
+  const lander = makePlane("#eef3f8", 1.4); g.add(lander); lander.scale.setScalar(1.4);
+  fiaPlanes.push({ m: lander, x0: s.x + 30, x1: s.x + s.w - 30, z: s.y + 221, t: 9, land: true });
   scene.add(g);
   return g;
 }
 function updateFia(dt) {
   for (const f of fiaPlanes) {
     f.t += dt;
+    if (f.land) {                                    // comes in low from the west, touches down, slows, and is gone
+      const T = 24, u = (f.t % T) / T;
+      if (u > 0.62) { f.m.visible = false; continue; }
+      f.m.visible = true;
+      const v = u / 0.62, x = f.x0 - 1500 + (1500 + (f.x1 - f.x0) * 0.82) * (1 - (1 - Math.min(1, v * 1.35)) ** 1.4) * 0.999;
+      const air = Math.max(0, 1 - v * 2.2);
+      f.m.position.set(Math.min(x, f.x1 - 40), air * air * 190, f.z);
+      f.m.rotation.set(0, 0, -air * 0.12);
+      continue;
+    }
     const T = 16, u = (f.t % T) / T;             // 16 seconds a lap: wait, roll, lift off, fly away
     const wait = 0.2;
     if (u < wait) { f.m.position.set(f.x0, 0, f.z); f.m.rotation.set(0, 0, 0); continue; }
@@ -433,13 +588,15 @@ const trees = [];
   }
   // the countryside outside the ring road: a forest, kept off the hills, lakes, river and mountains
   const inTown = (x, y) => x > -30 && x < W + 30 && y > -30 && y < H + 30;
-  for (let i = 0; i < 2600 && trees.length < 520; i++) {
+  for (let i = 0; i < 6000 && trees.length < 800; i++) {
     const x = -OUT - 150 + r() * (W + 2 * OUT + 300), y = -OUT - 150 + r() * (H + 2 * OUT + 300);
     if (inTown(x, y)) continue;
     if (BLOCKERS.some((c) => Math.hypot(x - c.x, y - c.y) < c.r + 30)) continue;
     if (WILD.hills.some((h) => Math.hypot(x - h.x, y - h.y) < h.r * 1.05)) continue;
     if (MOUNTAINS.some((m) => Math.hypot(x - m.x, y - m.y) < m.r * 0.95)) continue;
-    if (RIVER.some((pt, k) => k && distSeg2(x, y, RIVER[k - 1], pt) < 28)) continue;
+    if (RIVERS.some((rv) => rv.some((pt, k) => k && distSeg2(x, y, rv[k - 1], pt) < 28))) continue;
+    if (Math.hypot(x - HIKE.x, y - HIKE.y) < HIKE.r * 1.0) continue;
+    if (nearHighway(x, y)) continue;
     if (trees.some((t) => Math.hypot(x - t.x, y - t.y) < 26)) continue;
     trees.push({ x, y, kind: r() < 0.6 ? "pine" : "round", k: 0.9 + r() * 0.8 });
   }
@@ -557,11 +714,11 @@ let night = false;
 const hemi = scene.children.find((o) => o.isHemisphereLight);
 const lamps = [];
 const lampMat = new THREE.MeshStandardMaterial({ color: "#fff2c2", emissive: "#ffd36b", emissiveIntensity: 0 });
-function addLamp(x, z) {
+function addLamp(x, z, y = 0) {
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 44, 8), mat("#4a4f57")); pole.position.y = 22; pole.castShadow = true; g.add(pole);
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(4, 10, 8), lampMat); bulb.position.y = 45; g.add(bulb);
-  g.position.set(x, 0, z); scene.add(g); lamps.push(g);
+  g.position.set(x, y, z); scene.add(g); lamps.push(g);
 }
 for (let x = 70; x < W - 40; x += 150) { addLamp(x, 476); addLamp(x, 594); }
 function setNight(on) {
@@ -605,9 +762,9 @@ function routePos(r, s) {
 }
 const LAN_E = 522, LAN_W = 548;   // main street lanes: eastbound in the north lane, westbound in the south lane (keep left)
 // A: east along the main street, down the east ring, west along the bottom, back up the west ring.
-const ROUTE_A = makeRoute([[RC, LAN_E], [W - RC, LAN_E], [W - RC, H - RC], [RC, H - RC]]);
+const ROUTE_A = (() => { const sE = ringS(W - RC, LAN_E), sW = ringS(RC, LAN_E); const n = ((sW - sE) % LOOP + LOOP) % LOOP; return makeRoute([[70, LAN_E], [W - RC - 4, LAN_E], ...ringLane(sE, n, 0).slice(1, -1)]); })();
 // B: west along the main street, up the west ring, east along the top, down the east ring to the main street again.
-const ROUTE_B = makeRoute([[W - RC, LAN_W], [RC, LAN_W], [RC, RC], [W - RC, RC]]);
+const ROUTE_B = (() => { const sW = ringS(RC, LAN_W), sE = ringS(W - RC, LAN_W); const n = ((sE - sW) % LOOP + LOOP) % LOOP; return makeRoute([[W - 70, LAN_W], [RC + 4, LAN_W], ...ringLane(sW, n, 0).slice(1, -1)]); })();
 // C: up the south road to the roundabout, once round it (clockwise, keeping left), and back down the other lane.
 const ROUTE_C = (() => {
   const pts = [[RB.x - 5, 520], [RB.x - 5, RB.y + RB.r + 2]];
@@ -620,7 +777,7 @@ for (const [route, n, vmax] of [[ROUTE_A, 5, 95], [ROUTE_B, 5, 90], [ROUTE_C, 2,
   for (let i = 0; i < n; i++) cars.push({ g: makeCar(CAR_COLS[carIdx++ % CAR_COLS.length]), route, s: (i / n) * route.L, v: 0, vmax: vmax * (0.9 + (carIdx % 3) * 0.06), hd: 0 });
 }
 function updateCars(dt) {
-  const others = (c) => [...cars.filter((o) => o !== c).map((o) => ({ x: o.g.position.x, y: o.g.position.z })), { x: jm.position.x, y: jm.position.z }, { x: PLAYER.x, y: PLAYER.y }];
+  const others = (c) => [...cars.filter((o) => o !== c).map((o) => ({ x: o.g.position.x, y: o.g.position.z })), ...(busApi ? busApi.buses.map((b) => ({ x: b.g.position.x, y: b.g.position.z })) : []), { x: jm.position.x, y: jm.position.z }, { x: PLAYER.x, y: PLAYER.y }];
   for (const c of cars) {
     const p = routePos(c.route, c.s), q = routePos(c.route, c.s + 30);
     let gap = Infinity;
@@ -634,7 +791,7 @@ function updateCars(dt) {
     c.v += (target - c.v) * Math.min(1, dt * (target < c.v ? 5 : 1.5));
     c.s += c.v * dt;
     const np = routePos(c.route, c.s);
-    c.g.position.set(np.x, 0, np.y);
+    c.g.position.set(np.x, c.elev || 0, np.y);
     const want = Math.atan2(np.hx, np.hy);
     let d = want - c.hd; d = Math.atan2(Math.sin(d), Math.cos(d)); c.hd += d * Math.min(1, dt * 6);
     c.g.rotation.y = c.hd;
@@ -655,14 +812,14 @@ function makeFigure(shirt) {
   scene.add(g);
   return g;
 }
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 18; i++) {
   const z = i % 2 ? 478 : 590;
-  peds.push({ g: makeFigure(SHIRTS[i % SHIRTS.length]), x: 100 + ((i * 131) % 1600), z, dir: i % 3 ? 1 : -1, v: 22 + ((i * 7) % 14), step: i });
+  peds.push({ g: makeFigure(SHIRTS[i % SHIRTS.length]), x: 100 + ((i * 197) % (W - 200)), z, dir: i % 3 ? 1 : -1, v: 22 + ((i * 7) % 14), step: i });
 }
 function updatePeds(dt) {
   for (const p of peds) {
     p.x += p.dir * p.v * dt;
-    if (p.x > 1740 || p.x < 60) p.dir *= -1;
+    if (p.x > W - 60 || p.x < 60) p.dir *= -1;
     p.step += dt * 8;
     p.g.position.set(p.x, 0, p.z);
     p.g.rotation.y = p.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -674,7 +831,7 @@ function updatePeds(dt) {
 
 // The map, top-right: the town and the countryside around it. Press M for a big map with names.
 // You are red, the Joelmobile is yellow, your car is orange, and the stops are blue.
-const MAPM = 300;                                   // margin around the town that the map shows
+const MAPM = 560;                                   // margin around the town that the map shows
 const MW = W + 2 * MAPM, MH = H + 2 * MAPM;
 const mini = document.createElement("canvas");
 mini.width = 760; mini.height = Math.round(760 * MH / MW);
@@ -702,15 +859,15 @@ function drawMini(now) {
   for (const hl of WILD.hills) { g.fillStyle = "#8a7a52"; g.beginPath(); g.arc(X(hl.x), Y(hl.y), L(hl.r * 0.8), 0, 7); g.fill(); g.fillStyle = "#a5946a"; g.beginPath(); g.arc(X(hl.x), Y(hl.y), L(hl.r * 0.4), 0, 7); g.fill(); }
   for (const m of MOUNTAINS) { g.fillStyle = "#8d949b"; g.beginPath(); g.moveTo(X(m.x - m.r * 0.8), Y(m.y + m.r * 0.5)); g.lineTo(X(m.x), Y(m.y - m.r * 0.6)); g.lineTo(X(m.x + m.r * 0.8), Y(m.y + m.r * 0.5)); g.closePath(); g.fill(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(X(m.x - m.r * 0.22), Y(m.y - m.r * 0.28)); g.lineTo(X(m.x), Y(m.y - m.r * 0.6)); g.lineTo(X(m.x + m.r * 0.22), Y(m.y - m.r * 0.28)); g.closePath(); g.fill(); }
   // water
-  g.strokeStyle = "#4da3d9"; g.lineWidth = Math.max(2, L(14)); g.lineJoin = "round"; g.beginPath(); RIVER.forEach(([x, y], k) => (k ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.stroke();
+  g.strokeStyle = "#4da3d9"; g.lineWidth = Math.max(2, L(14)); g.lineJoin = "round"; for (const RV of RIVERS) { g.beginPath(); RV.forEach(([x, y], k) => (k ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.stroke(); }
   g.fillStyle = "#4da3d9"; for (const l of WILD.lakes) { g.beginPath(); g.arc(X(l.x), Y(l.y), L(l.r), 0, 7); g.fill(); }
   // trees, as dots
   g.fillStyle = "#2f6f2a"; for (const t of trees) g.fillRect(X(t.x) - 1, Y(t.y) - 1, 2.2, 2.2);
   // roads
   g.fillStyle = "#4b4f55";
   g.fillRect(X(0), Y(500), L(W), L(70)); g.fillRect(X(0), Y(1002), L(W), L(32));
-  g.fillRect(X(0), Y(0), L(W), L(BAND)); g.fillRect(X(0), Y(H - BAND), L(W), L(BAND));
-  g.fillRect(X(0), Y(0), L(BAND), L(H)); g.fillRect(X(W - BAND), Y(0), L(BAND), L(H));
+  g.strokeStyle = "#4b4f55"; g.lineWidth = L(BAND); g.lineJoin = "round"; g.beginPath(); RING.pts.forEach((q, i) => (i ? g.lineTo(X(q[0]), Y(q[1])) : g.moveTo(X(q[0]), Y(q[1])))); g.closePath(); g.stroke();
+  g.strokeStyle = "#c2a86b"; g.lineWidth = Math.max(2, L(30)); g.beginPath(); HWY.forEach((q, i) => (i ? g.lineTo(X(q[0]), Y(q[1])) : g.moveTo(X(q[0]), Y(q[1])))); g.closePath(); g.stroke();   // the highway
   g.strokeStyle = "#4b4f55"; g.lineCap = "butt";
   for (const r of ROAD_NET) { g.lineWidth = Math.max(2, L(r.w)); g.beginPath(); g.moveTo(X(r.a[0]), Y(r.a[1])); g.lineTo(X(r.b[0]), Y(r.b[1])); g.stroke(); }
   g.lineWidth = L(ROAD_W);
@@ -724,6 +881,11 @@ function drawMini(now) {
     g.strokeStyle = s.trim; g.lineWidth = 1.2; g.strokeRect(X(s.x), Y(s.y), L(s.w), L(s.h));
     if (bigMap || s.w > 330) { g.fillStyle = "#1a1a1a"; g.font = `${bigMap ? 12 : 11}px system-ui, sans-serif`; g.fillText(s.name.replace("Peanut ", "").replace(" Office", ""), X(s.x + s.w / 2), Y(s.y + s.h / 2)); }
   }
+  // the bus routes (on the big map), the bus stops and the buses
+  if (bigMap) { g.lineWidth = 2.2; g.globalAlpha = 0.7; for (const r of busApi.ROUTES) { g.strokeStyle = r.col; g.beginPath(); r.poly.forEach((q, i) => (i ? g.lineTo(X(q[0]), Y(q[1])) : g.moveTo(X(q[0]), Y(q[1])))); g.closePath(); g.stroke(); } g.globalAlpha = 1; }
+  g.fillStyle = "#fff"; g.strokeStyle = "#0b3b8f"; g.lineWidth = 1.4;
+  for (const st of busApi.stops) { g.beginPath(); g.rect(X(st.x) - 2.5, Y(st.y) - 2.5, 5, 5); g.fill(); g.stroke(); }
+  for (const b of busApi.buses) { g.fillStyle = b.r.col; g.beginPath(); g.arc(X(b.g.position.x), Y(b.g.position.z), bigMap ? 4.5 : 3.5, 0, 7); g.fill(); g.strokeStyle = "#fff"; g.lineWidth = 1; g.stroke(); }
   // stops, the Joelmobile, your car and you
   for (const st of STOPS) { g.fillStyle = "#1e63c8"; g.beginPath(); g.arc(X(st.x), Y(st.y), 4.5, 0, 7); g.fill(); g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke(); }
   g.fillStyle = "#ffd400"; g.beginPath(); g.arc(X(jm.position.x), Y(jm.position.z), 5, 0, 7); g.fill();
@@ -762,6 +924,13 @@ function addRoad(r) {
   }
 }
 for (const r of ROAD_NET) addRoad(r);
+fillet(RB.x - ROAD_W / 2, 500, -1, -1); fillet(RB.x + ROAD_W / 2, 500, 1, -1);          // the south road joins the main street
+fillet(1650 - 12, 570, -1, 1); fillet(1650 + 12, 570, 1, 1);                              // the side road joins the main street...
+fillet(1650 - 12, 1002, -1, -1); fillet(1650 + 12, 1002, 1, -1);                          // ...and the south street
+fillet(2310 - 13, 570, -1, 1); fillet(2310 + 13, 570, 1, 1);                              // the terminal link joins the main street
+fillet(2310 - 13, 710, -1, -1, 12); fillet(2310 + 13, 710, 1, -1, 12);
+for (const [x, z] of [[2087, 727], [2533, 727], [2087, 933], [2533, 933]]) { const c = new THREE.Mesh(new THREE.CircleGeometry(17, 20), FILLET_MAT); c.rotation.x = -Math.PI / 2; c.position.set(x, 0.27, z); scene.add(c); }   // round corners on the loop
+
 // A zebra crossing spans the whole width of a road: bars run along the road, in a row across it.
 function crossing(cx, zTop, zBottom) {
   for (let z = zTop + 4; z < zBottom - 2; z += 8) {
@@ -835,7 +1004,7 @@ function vnoise(x, y) {
 const moundH = (o, d) => (d >= 1 ? 0 : o.h * Math.pow(1 - d * d, o.power));
 // A hill or mountain is a round heightfield, coloured by height: grass, scrub, rock and (for mountains) snow.
 function mound(o) {
-  const segs = o.h > 200 ? 56 : 44;
+  const segs = o.hike ? 170 : o.h > 200 ? 56 : 44;
   const geo = new THREE.PlaneGeometry(2 * o.r, 2 * o.r, segs, segs);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
@@ -859,6 +1028,7 @@ function mound(o) {
 }
 for (const h of WILD.hills) mound(h);
 for (const m of MOUNTAINS) mound(m);
+mound(HIKE);
 
 // Water: lakes with a sandy shore, a river, and ripples that drift.
 const waterTex = canvasTex(128, 128, (g) => {
@@ -876,8 +1046,8 @@ for (const l of WILD.lakes) {
   const lake = new THREE.Mesh(new THREE.CircleGeometry(l.r, 48), waterMat(l.r / 22, l.r / 22));
   lake.rotation.x = -Math.PI / 2; lake.position.set(l.x, 0.55, l.y); lake.receiveShadow = true; scene.add(lake);
 }
-for (let k = 1; k < RIVER.length; k++) {
-  const [x1, y1] = RIVER[k - 1], [x2, y2] = RIVER[k], len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1);
+for (const RV of RIVERS) for (let k = 1; k < RV.length; k++) {
+  const [x1, y1] = RV[k - 1], [x2, y2] = RV[k], len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1);
   const g = new THREE.Group(); g.position.set((x1 + x2) / 2, 0, (y1 + y2) / 2); g.rotation.y = -ang;
   const bank = new THREE.Mesh(new THREE.PlaneGeometry(len + 14, 30), mat("#d6c595")); bank.rotation.x = -Math.PI / 2; bank.position.y = 0.3; g.add(bank);
   const flow = new THREE.Mesh(new THREE.PlaneGeometry(len + 14, 18), waterMat(len / 36, 0.5)); flow.rotation.x = -Math.PI / 2; flow.position.y = 0.5; g.add(flow);
@@ -973,6 +1143,8 @@ async function carApi(method, path, body) {
   if (!CFG || !cloudMod || !cloudMod.cloudLinked()) throw new Error("login");
   const res = await fetch(CFG.CLOUD_URL + path, { method, headers: { ...(body ? { "content-type": "application/json" } : {}), authorization: "Bearer " + cloudMod.cloudState().token }, body: body ? JSON.stringify(body) : undefined });
   const j = await res.json().catch(() => ({}));
+  if (res.status === 404) throw new Error("That shop is not open yet: the Octee Cloud has not been updated with it. (Deploy the latest cloud/index.js.)");
+  if (res.status === 401) throw new Error("Log in to Octee Cloud first.");
   if (!res.ok) throw new Error(j.message || "Nothing was changed.");
   return j;
 }
@@ -1005,14 +1177,16 @@ function renderGarage() {
   garagePanel.replaceChildren(...kids);
 }
 const nearCarPark = () => Math.hypot(PLAYER.x - 340, PLAYER.y - 745) < 150;
+function showGarage() { garagePanel.hidden = false; garage.msg = ""; renderGarage(); loadGarage(); }
 function toggleGarage() {
-  if (inside.on) return;
+  if (inside.on) { if (inside.state.b && inside.state.b.id === "car") showGarage(); return; }
+  if (busApi.riding) return;
   if (!garagePanel.hidden) { garagePanel.hidden = true; return; }
   if (!nearCarPark() || drive.on) { jmMsg = "The Car Park sells the cars. Walk to it on foot and press G."; return; }
   garagePanel.hidden = false; garage.msg = ""; renderGarage(); loadGarage();
 }
 function toggleCar() {
-  if (inside.on) return;
+  if (inside.on || busApi.riding) return;
   if (!drive.mesh) { jmMsg = "You do not own a car yet. Buy one at the Car Park (press G there)."; return; }
   if (drive.on) {
     drive.on = false; drive.v = 0;
@@ -1037,13 +1211,20 @@ function driveStep(dt) {
 }
 loadGarage();
 
+// The trail up the big mountain, the highway round the town, and its bridges (walk-world.js)
+createWorld({ THREE, scene, mat, label, addLamp, ribbon, ribbonGeo, dashAlong, HIKE, TRAIL, TRAIL_W, JUMPS, HWY, HWY_H, RIVER_N, RIVER_S, cars, makeCar, makeRoute, W, H });
+
+// The buses (walk-bus.js)
+busApi = createBus({ THREE, scene, mat, label, PLAYER, stage, W, H, RB, SOLID, makeFigure, routePos, makeRoute, ringS, ringLane, LOOP, cars, jm, setMsg: (t) => { jmMsg = t; } });
+
 // Inside the shops (walk-inside.js)
-inside = createInside({ THREE, scene, mat, label, makeFigure, PLAYER, stage, B, tileTex, carApi, loggedIn: () => !!(cloudMod && cloudMod.cloudLinked()), free });
+inside = createInside({ THREE, scene, mat, label, makeFigure, PLAYER, stage, B, tileTex, carApi, loggedIn: () => !!(cloudMod && cloudMod.cloudLinked()), free, openRoutes: () => busApi.showRoutes(), openGarage: () => showGarage() });
 
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
 function action() {
   if (inside.on) { inside.action(); return; }
+  if (busApi.action()) return;
   if (PLAYER.riding || drive.on) return;
   const s = nearestStop();
   if (s >= 0) {
@@ -1059,11 +1240,14 @@ window.addEventListener("keydown", (e) => {
   if (k === "e") action();
   if (k === "n") setNight(!night);
   if (k === "f") toggleFull();
+  if (k === "b") busApi.showArrivals();
+  if (k === "k") busApi.showRoutes();
+  if (e.code === "Space") { e.preventDefault(); if (!PLAYER.riding && !drive.on && PLAYER.hop === 0 && !e.repeat) PLAYER.vh = 190; }
   if (k === "m") toggleBigMap();
   if (k === "i") { if (inside.panelOpen) inside.close(); else inside.openBag(); }
   if (k === "v") toggleCar();
   if (k === "g") toggleGarage();
-  if (k === "escape") { garagePanel.hidden = true; inside.close(); }
+  if (k === "escape") { garagePanel.hidden = true; inside.close(); busApi.close(); }
   if (PLAYER.riding && k >= "1" && k <= "4") { const b = ridePanel.querySelectorAll("button")[Number(k) - 1]; if (b) b.click(); }
 });
 window.addEventListener("keyup", (e) => { const k = e.key.toLowerCase(); if (KEYMAP[k]) keys.delete(KEYMAP[k]); });
@@ -1076,7 +1260,7 @@ for (const b of document.querySelectorAll("#walk-buttons button, button[data-k]"
 }
 
 // Camera: a third-person view from behind and above, which follows you.
-const cam = { x: PLAYER.x, y: PLAYER.y };
+const cam = { x: PLAYER.x, y: PLAYER.y, h: 0 };
 function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h, false);
@@ -1095,7 +1279,8 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   // driving, or walking
-  if (drive.on) driveStep(dt);
+  if (busApi.riding) { /* the bus carries you */ }
+  else if (drive.on) driveStep(dt);
   else if (!PLAYER.riding) {
     let dx = 0, dy = 0;
     if (keys.has("left")) dx -= 1;
@@ -1114,6 +1299,11 @@ function frame(now) {
     const p = ringPoint(jmState.s);
     setPlayerPos(p.x + 8, p.y + 8);
   }
+  // height: you stand on the trail's steps, and Space hops
+  { const gy = groundAt(PLAYER.x, PLAYER.y); PLAYER.gy += (gy - PLAYER.gy) * Math.min(1, dt * 16);
+    if (PLAYER.hop > 0 || PLAYER.vh) { PLAYER.vh -= 520 * dt; PLAYER.hop += PLAYER.vh * dt; if (PLAYER.hop <= 0) { PLAYER.hop = 0; PLAYER.vh = 0; } }
+    PLAYER.z = PLAYER.gy + PLAYER.hop; }
+  busApi.update(dt);
   updateJM(dt);
   updateCars(dt);
   updatePeds(dt);
@@ -1121,24 +1311,26 @@ function frame(now) {
   updateFia(dt);
   drawMini(now);
   // draw the player
-  player3.position.set(PLAYER.x, 0, PLAYER.y);
+  player3.position.set(PLAYER.x, PLAYER.z, PLAYER.y);
   player3.rotation.y = PLAYER.face;
   const sw = Math.sin(PLAYER.step) * 0.7, u = player3.userData;
   if (u.legL) { u.legL.rotation.x = sw; u.legR.rotation.x = -sw; }
-  player3.visible = !(PLAYER.riding || drive.on);
+  player3.visible = !(PLAYER.riding || drive.on || busApi.riding);
   // camera
   cam.x += (PLAYER.x - cam.x) * Math.min(1, dt * 8);
   cam.y += (PLAYER.y - cam.y) * Math.min(1, dt * 8);
   const co = inside.on ? inside.camOffset : { x: -60, y: 330, z: 300 };
-  camera.position.set(cam.x + co.x, co.y, cam.y + co.z);
-  camera.lookAt(cam.x, 20, cam.y);
-  sun.position.set(cam.x - 500, 900, cam.y + 380);
-  sun.target.position.set(cam.x, 0, cam.y);
+  cam.h += (PLAYER.gy - cam.h) * Math.min(1, dt * 5);
+  camera.position.set(cam.x + co.x, co.y + cam.h, cam.y + co.z);
+  camera.lookAt(cam.x, 20 + cam.h, cam.y);
+  sun.position.set(cam.x - 500, 900 + cam.h, cam.y + 380);
+  sun.target.position.set(cam.x, cam.h, cam.y);
   if (!sun.target.parent) scene.add(sun.target);
   renderer.render(scene, camera);
   // the prompt
   let text = jmMsg;
   if (!text && inside.on) text = inside.prompt();
+  else if (!text && busApi.prompt()) text = busApi.prompt();
   else if (!text) {
     const s = nearestStop();
     const door = nearestDoor();
@@ -1157,4 +1349,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // For tests: lets a script read where you are and what the Joelmobile is doing.
-window.__walk = { inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
+window.__walk = { busApi, TRAIL, groundAt, inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };

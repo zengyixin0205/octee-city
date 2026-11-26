@@ -101,7 +101,8 @@ export function createInside(ctx) {
     const clerk = makeFigure("#2a7de1"); clerk.position.set(cx, 0, cy - 22); clerk.rotation.y = 0;
     S.clerk = clerk;
     const cl = label(jobs.length ? "Clock in here" : "Information", { size: 34 }); cl.scale.multiplyScalar(0.4); cl.position.set(cx, 60, cy); g.add(cl);
-    S.spots.push({ x: cx, y: cy + 30, r: 42, text: jobs.length ? "Press E to clock in at the counter" : "Press E to talk to the counter", run: () => openCounter(b, jobs) });
+    const special = b.id === "terminal" ? "Press E to see the bus routes" : b.id === "car" ? "Press E to see the cars for sale" : null;
+    S.spots.push({ x: cx, y: cy + 30, r: 42, text: special || (jobs.length ? "Press E to clock in at the counter" : "Press E to talk to the counter"), run: () => (b.id === "terminal" && ctx.openRoutes ? ctx.openRoutes() : b.id === "car" && ctx.openGarage ? ctx.openGarage() : openCounter(b, jobs)) });
 
     // shelves, if this is a shop
     const sh = SHELVES[b.id];
