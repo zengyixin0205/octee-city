@@ -20,6 +20,7 @@
 #walk-ride button{display:block;width:100%;margin:6px 0;padding:6px 8px;border:1px solid #888;border-radius:6px;background:#f6f6f6;cursor:pointer;text-align:left}
 .walk-help{color:var(--muted,#555);font-size:.95em;margin:8px 0}
 .walk-key{display:inline-block;border:1px solid #888;border-bottom-width:3px;border-radius:5px;padding:0 6px;font-family:monospace;background:#fff;color:#222}
+#walk-stage:fullscreen{aspect-ratio:auto;width:100vw;height:100vh;border:0;border-radius:0;max-width:none}
 #walk-buttons{display:grid;grid-template-columns:repeat(3,64px);gap:6px;justify-content:center;margin:8px 0}
 </style>
 </head>
@@ -33,7 +34,16 @@
     <div id="walk-hud" role="status" aria-live="polite"></div>
     <div id="walk-ride" hidden></div>
   </div>
-  <p class="walk-help"><span class="walk-key">W</span><span class="walk-key">A</span><span class="walk-key">S</span><span class="walk-key">D</span> or the arrow keys to walk. <span class="walk-key">E</span> to go in, call the Joelmobile at a stop, or get on it. <kbd>G</kbd> at the Car Park to buy a car, <kbd>V</kbd> to get in or out of your car and drive it. On a phone, use the buttons below.</p>
+  <p class="walk-help"><span class="walk-key">W</span><span class="walk-key">A</span><span class="walk-key">S</span><span class="walk-key">D</span> or the arrow keys to walk. On a phone, use the buttons below.</p>
+  <ul class="walk-help" style="margin:4px 0 8px 18px;padding:0;line-height:1.7">
+    <li><span class="walk-key">E</span> go into a shop, come out again, use a counter or shelf, call the Joelmobile or get on it.</li>
+    <li>Inside a shop, walk to the <strong>counter</strong> and press <span class="walk-key">E</span> to clock in. Walk to a <strong>shelf</strong> and press <span class="walk-key">E</span> to buy things (grocery, bakery, food court, night market). Log in first.</li>
+    <li><span class="walk-key">F</span> full screen, and <span class="walk-key">F</span> again to leave full screen.</li>
+    <li><span class="walk-key">N</span> night mode, and <span class="walk-key">N</span> again for day.</li>
+    <li><span class="walk-key">M</span> big map with names, and <span class="walk-key">M</span> again to shrink it. <span class="walk-key">I</span> your bag.</li>
+    <li><span class="walk-key">G</span> at the Car Park to buy a car. <span class="walk-key">V</span> to get in or out of your car and drive it.</li>
+    <li><span class="walk-key">Esc</span> closes any panel.</li>
+  </ul>
   <div id="walk-buttons">
     <span></span><button class="btn ghost" type="button" data-k="up">▲</button><span></span>
     <button class="btn ghost" type="button" data-k="left">◀</button><button class="btn ghost" type="button" data-k="down">▼</button><button class="btn ghost" type="button" data-k="right">▶</button>

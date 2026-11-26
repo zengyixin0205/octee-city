@@ -1,10 +1,12 @@
 // Walk around Octee City in 3D (Three.js). WASD or arrow keys to walk, E to go in, call the Joelmobile at a stop, or get on it.
 // Everything is drawn in code: no photos. The map is hand-placed and not symmetrical.
 import * as THREE from "three";
+import { createInside } from "./walk-inside.js";
 // The cloud is only needed to buy a car. The walk works without it.
 let CFG = null, cloudMod = null;
 try { CFG = (await import("./config.js")).CONFIG; cloudMod = await import("./cloud.js"); } catch { /* no cloud: the walk still works */ }
 
+let inside = null;                   // the shop interiors (see walk-inside.js), made once the scene exists
 const W = 1800, H = 1200;            // the town, in world units (1 unit is roughly a metre of a very small town)
 
 // Buildings: a box on the ground (x, y = top-left in plan), its height, and its colours and extras.
@@ -33,10 +35,11 @@ const B = [
   { id: "laundry", name: "Laundrette", x: 900, y: 900, w: 120, h: 100, H: 30, body: "#e5f0ff", trim: "#3d6aa0", roof: "flat", round: true },
   { id: "pool", name: "Swimming Pool", x: 1100, y: 880, w: 190, h: 130, H: 18, body: "#7fd3e8", trim: "#1b6f86", roof: "none", water: true },
   { id: "market", name: "Night Market", x: 1380, y: 820, w: 200, h: 120, H: 26, body: "#ffb36b", trim: "#7a3b00", roof: "pitch", stalls: true },
+  { id: "grocery", name: "Grocery Store", x: 1400, y: 1050, w: 170, h: 100, H: 40, body: "#cfe8c0", trim: "#2f6b2a", roof: "flat", stripes: true },
   { id: "lounge", name: "Platinum Lounge", x: 1120, y: 1040, w: 160, h: 100, H: 44, body: "#d9d4ee", trim: "#4b3f7a", roof: "flat", gold: true },
 ];
 // The airport: a long terminal, a runway and a control tower. You can walk in through its door to the Octee Airlines site.
-const FIA = { id: "fia", name: "FIA airport", x: 1280, y: 40, w: 440, h: 190, H: 36, body: "#e8eef4", trim: "#33414e", roof: "flat", runway: true, href: "https://zengyixin0205.github.io/Octee-airline/" };
+const FIA = { id: "fia", name: "FIA airport", x: 910, y: 40, w: 760, h: 200, H: 62, body: "#e8eef4", trim: "#33414e", roof: "flat", runway: true, href: "https://zengyixin0205.github.io/Octee-airline/" };
 const SOLID = [...B, FIA];
 
 // The countryside beyond the ring road: you can walk out to OUT units past the edge of town.
@@ -77,7 +80,7 @@ const SEGS = [];
   }
 }
 SEGS.push([RB.x, RB.y + RB.r, RB.x, 504]);     // south road, runs into the main street
-SEGS.push([RB.x, RB.y - RB.r, RB.x, 236]);     // north road, runs into the airport
+SEGS.push([RB.x, RB.y - RB.r, RB.x, 244]);     // north road, runs into the airport
 SEGS.push([RB.x - RB.r, RB.y, 1125, RB.y]);    // west road, runs into the power station
 function segDist(px, py, [x1, y1, x2, y2]) {
   const dx = x2 - x1, dy = y2 - y1;
@@ -114,6 +117,7 @@ const BODY = { w: 18, h: 14 };                 // the player's feet, for walls
 // ---- helpers ----
 const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 function free(px, py, body = BODY) {
+  if (inside && inside.on) return inside.free(px, py, body);
   const box = { x: px - body.w / 2, y: py - body.h / 2, w: body.w, h: body.h };
   if (box.x < -OUT || box.y < -OUT || box.x + box.w > W + OUT || box.y + box.h > H + OUT) return false;
   for (const c of BLOCKERS) if (Math.hypot(px - c.x, py - c.y) < c.r + body.w / 2) return false;
@@ -344,18 +348,65 @@ function addBuilding(s) {
   scene.add(g);
   return g;
 }
+const fiaPlanes = [];
+function makePlane(col, scale = 1) {
+  const g = new THREE.Group();
+  const fus = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 54, 14), mat(col, { roughness: 0.35 })); fus.rotation.z = Math.PI / 2; fus.position.y = 9; fus.castShadow = true; g.add(fus);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(5, 12, 8), mat(col, { roughness: 0.35 })); nose.position.set(27, 9, 0); g.add(nose);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(16, 1.4, 62), mat("#d7dde4")); wing.position.set(2, 8, 0); wing.castShadow = true; g.add(wing);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(9, 14, 1.4), mat("#c0392b")); tail.position.set(-24, 17, 0); tail.castShadow = true; g.add(tail);
+  const tailW = new THREE.Mesh(new THREE.BoxGeometry(7, 1.2, 20), mat("#d7dde4")); tailW.position.set(-24, 11, 0); g.add(tailW);
+  for (const z of [-17, 17]) { const eng = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 8, 10), mat("#9aa3ad")); eng.rotation.z = Math.PI / 2; eng.position.set(7, 5, z); g.add(eng); }
+  const win = new THREE.Mesh(new THREE.BoxGeometry(34, 2.2, 10.2), mat("#1d3557")); win.position.set(3, 11, 0); g.add(win);
+  g.scale.setScalar(scale);
+  return g;
+}
 function addFia(s) {
   const g = new THREE.Group();
-  const term = new THREE.Mesh(new THREE.BoxGeometry(s.w - 60, s.H, 120), [mat(s.body), mat(s.body), mat(s.body), mat(s.body), new THREE.MeshStandardMaterial({ map: facadeTex(s.body, s.trim), roughness: 0.6 }), mat(s.body)]);
-  term.position.set(s.x + s.w / 2 - 30, s.H / 2, s.y + 60); term.castShadow = true; term.receiveShadow = true; g.add(term);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(s.w - 50, 6, 130), mat(s.trim)); roof.position.set(s.x + s.w / 2 - 30, s.H + 3, s.y + 60); roof.castShadow = true; g.add(roof);
-  const runway = new THREE.Mesh(new THREE.PlaneGeometry(s.w - 60, 50), mat("#4b4f55")); runway.rotation.x = -Math.PI / 2; runway.position.set(s.x + s.w / 2 - 30, 0.3, s.y + 220); runway.receiveShadow = true; g.add(runway);
-  for (let i = 0; i < 9; i++) { const dash = new THREE.Mesh(new THREE.PlaneGeometry(12, 2), mat("#ffffff")); dash.rotation.x = -Math.PI / 2; dash.position.set(s.x + 40 + i * 44, 0.4, s.y + 220); g.add(dash); }
-  const ctower = new THREE.Mesh(new THREE.CylinderGeometry(10, 14, 110, 14), mat("#e8eef4")); ctower.position.set(s.x + s.w - 40, 55, s.y + 40); ctower.castShadow = true; g.add(ctower);
-  const cab = new THREE.Mesh(new THREE.CylinderGeometry(22, 16, 16, 14), mat("#33414e")); cab.position.set(s.x + s.w - 40, 118, s.y + 40); cab.castShadow = true; g.add(cab);
-  const sign = label("FIA airport", { size: 44 }); sign.position.set(s.x + s.w / 2 - 30, s.H + 40, s.y + 60); g.add(sign);
+  const cx = s.x + s.w / 2;
+  // the terminal: a long hall at the back, two piers reaching towards the runway, and a glass front
+  const hall = new THREE.Mesh(new THREE.BoxGeometry(s.w - 120, s.H, 100), [mat(s.body), mat(s.body), mat(s.body), mat(s.body), new THREE.MeshStandardMaterial({ map: facadeTex(s.body, s.trim), roughness: 0.5 }), mat(s.body)]);
+  hall.position.set(cx, s.H / 2, s.y + 55); hall.castShadow = true; hall.receiveShadow = true; g.add(hall);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(s.w - 100, 6, 112), mat(s.trim)); roof.position.set(cx, s.H + 3, s.y + 55); roof.castShadow = true; g.add(roof);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(s.w - 300, s.H * 0.8, 6), mat("#8fc1e3", { roughness: 0.1, metalness: 0.5 })); glass.position.set(cx, s.H * 0.42, s.y + 107); g.add(glass);
+  for (const sgn of [-1, 1]) {
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(60, s.H * 0.55, 90), mat(s.body)); pier.position.set(cx + sgn * (s.w / 2 - 90), s.H * 0.275, s.y + 110); pier.castShadow = true; pier.receiveShadow = true; g.add(pier);
+    const pr = new THREE.Mesh(new THREE.BoxGeometry(66, 4, 96), mat(s.trim)); pr.position.set(cx + sgn * (s.w / 2 - 90), s.H * 0.55 + 2, s.y + 110); pr.castShadow = true; g.add(pr);
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 26), mat("#aab4bd")); bridge.position.set(cx + sgn * (s.w / 2 - 90), 14, s.y + 168); g.add(bridge);
+  }
+  // apron, runway and taxiway
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(s.w - 40, 56), mat("#6c7078")); apron.rotation.x = -Math.PI / 2; apron.position.set(cx, 0.25, s.y + 175); apron.receiveShadow = true; g.add(apron);
+  const runway = new THREE.Mesh(new THREE.PlaneGeometry(s.w - 20, 34), mat("#3f4348")); runway.rotation.x = -Math.PI / 2; runway.position.set(cx, 0.3, s.y + 221); runway.receiveShadow = true; g.add(runway);
+  for (let i = 0; i < 24; i++) { const dash = new THREE.Mesh(new THREE.PlaneGeometry(14, 2), mat("#ffffff")); dash.rotation.x = -Math.PI / 2; dash.position.set(s.x + 24 + i * ((s.w - 48) / 23), 0.4, s.y + 221); g.add(dash); }
+  for (let i = 0; i < 16; i++) { for (const z of [s.y + 205, s.y + 237]) { const lt = new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshStandardMaterial({ color: "#ffe9a8", emissive: "#ffcf5c", emissiveIntensity: 0.9 })); lt.position.set(s.x + 30 + i * ((s.w - 60) / 15), 1.5, z); g.add(lt); } }
+  // the control tower
+  const tx = s.x + s.w - 60, tz = s.y + 60;
+  const ctower = new THREE.Mesh(new THREE.CylinderGeometry(10, 16, 160, 14), mat("#e8eef4")); ctower.position.set(tx, 80, tz); ctower.castShadow = true; g.add(ctower);
+  const cab = new THREE.Mesh(new THREE.CylinderGeometry(28, 18, 20, 14), mat("#2a3a4a", { roughness: 0.2, metalness: 0.4 })); cab.position.set(tx, 172, tz); cab.castShadow = true; g.add(cab);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(3, 28, 8, 14), mat("#e8eef4")); cap.position.set(tx, 186, tz); g.add(cap);
+  // a second, smaller tower at the other end, and a hangar
+  const hangar = new THREE.Mesh(new THREE.CylinderGeometry(34, 34, 80, 3, 1, false, 0, Math.PI), mat("#9aa3ad")); hangar.rotation.z = Math.PI / 2; hangar.rotation.y = Math.PI / 2; hangar.position.set(s.x + 90, 0, s.y + 195); hangar.scale.set(0.6, 1, 1); g.add(hangar);
+  const sign = label("FIA airport", { size: 56 }); sign.scale.multiplyScalar(1.6); sign.position.set(cx, s.H + 62, s.y + 60); g.add(sign);
+  // parked planes at the piers and the middle
+  for (const [px, col] of [[cx - (s.w / 2 - 90), "#f4f4f4"], [cx + (s.w / 2 - 90), "#e6eef7"], [cx - 60, "#fff3d0"]]) { const pl = makePlane(col, 1.2); pl.position.set(px, 0, s.y + 180); pl.rotation.y = -Math.PI / 2; g.add(pl); }
+  // one plane that takes off along the runway, again and again
+  const flyer = makePlane("#ffffff", 1.4); flyer.position.set(s.x + 30, 0, s.y + 221); g.add(flyer);
+  fiaPlanes.push({ m: flyer, x0: s.x + 30, x1: s.x + s.w - 30, z: s.y + 221, t: 0 });
   scene.add(g);
   return g;
+}
+function updateFia(dt) {
+  for (const f of fiaPlanes) {
+    f.t += dt;
+    const T = 16, u = (f.t % T) / T;             // 16 seconds a lap: wait, roll, lift off, fly away
+    const wait = 0.2;
+    if (u < wait) { f.m.position.set(f.x0, 0, f.z); f.m.rotation.set(0, 0, 0); continue; }
+    const v = (u - wait) / (1 - wait);
+    const x = f.x0 + (f.x1 - f.x0 + 160) * v * v;           // speeds up
+    const lift = Math.max(0, (v - 0.55) / 0.45);
+    f.m.position.set(x, lift * lift * 140, f.z);
+    f.m.rotation.set(0, 0, lift * 0.45);
+  }
 }
 const buildingMeshes = new Map();
 for (const s of B) buildingMeshes.set(s.id, addBuilding(s));
@@ -621,35 +672,66 @@ function updatePeds(dt) {
   }
 }
 
-// Mini-map in the top-right corner: the town, you (red), the Joelmobile (yellow) and its stops (blue).
+// The map, top-right: the town and the countryside around it. Press M for a big map with names.
+// You are red, the Joelmobile is yellow, your car is orange, and the stops are blue.
+const MAPM = 300;                                   // margin around the town that the map shows
+const MW = W + 2 * MAPM, MH = H + 2 * MAPM;
 const mini = document.createElement("canvas");
-mini.width = 240; mini.height = 160;
+mini.width = 760; mini.height = Math.round(760 * MH / MW);
 mini.setAttribute("aria-hidden", "true");
-mini.style.cssText = "position:absolute;right:10px;top:10px;width:180px;height:120px;border:2px solid #fff;border-radius:8px;background:#5d9a48;pointer-events:none;";
+let bigMap = false;
+function sizeMap() {
+  mini.style.cssText = `position:absolute;right:10px;top:10px;width:${bigMap ? "auto" : "300px"};height:${bigMap ? "calc(100% - 20px)" : "auto"};max-width:94%;aspect-ratio:${MW}/${MH};border:2px solid #fff;border-radius:8px;background:#4f8a3c;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:${bigMap ? 4 : 1};`;
+}
+function toggleBigMap() { bigMap = !bigMap; sizeMap(); miniAt = 0; }
+sizeMap();
 stage.style.position = "relative";
 stage.appendChild(mini);
 const mctx = mini.getContext("2d");
 let miniAt = 0;
 function drawMini(now) {
-  if (now - miniAt < 100) return;
+  mini.style.display = inside.on ? "none" : "";
+  if (inside.on || now - miniAt < 100) return;
   miniAt = now;
-  const g = mctx, w = mini.width, h = mini.height, sx = (w - 16) / W, sy = (h - 16) / H;
-  const X = (x) => 8 + x * sx, Y = (y) => 8 + y * sy;
+  const g = mctx, w = mini.width, h = mini.height, sc = w / MW;
+  const X = (x) => (x + MAPM) * sc, Y = (y) => (y + MAPM) * sc, L = (v) => v * sc;
   g.clearRect(0, 0, w, h);
-  g.fillStyle = "#5d9a48"; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#4f8a3c"; g.fillRect(0, 0, w, h);                       // the countryside
+  g.fillStyle = "#6fae52"; g.fillRect(X(0), Y(0), L(W), L(H));           // the town
+  // hills and mountains
+  for (const hl of WILD.hills) { g.fillStyle = "#8a7a52"; g.beginPath(); g.arc(X(hl.x), Y(hl.y), L(hl.r * 0.8), 0, 7); g.fill(); g.fillStyle = "#a5946a"; g.beginPath(); g.arc(X(hl.x), Y(hl.y), L(hl.r * 0.4), 0, 7); g.fill(); }
+  for (const m of MOUNTAINS) { g.fillStyle = "#8d949b"; g.beginPath(); g.moveTo(X(m.x - m.r * 0.8), Y(m.y + m.r * 0.5)); g.lineTo(X(m.x), Y(m.y - m.r * 0.6)); g.lineTo(X(m.x + m.r * 0.8), Y(m.y + m.r * 0.5)); g.closePath(); g.fill(); g.fillStyle = "#fff"; g.beginPath(); g.moveTo(X(m.x - m.r * 0.22), Y(m.y - m.r * 0.28)); g.lineTo(X(m.x), Y(m.y - m.r * 0.6)); g.lineTo(X(m.x + m.r * 0.22), Y(m.y - m.r * 0.28)); g.closePath(); g.fill(); }
+  // water
+  g.strokeStyle = "#4da3d9"; g.lineWidth = Math.max(2, L(14)); g.lineJoin = "round"; g.beginPath(); RIVER.forEach(([x, y], k) => (k ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.stroke();
+  g.fillStyle = "#4da3d9"; for (const l of WILD.lakes) { g.beginPath(); g.arc(X(l.x), Y(l.y), L(l.r), 0, 7); g.fill(); }
+  // trees, as dots
+  g.fillStyle = "#2f6f2a"; for (const t of trees) g.fillRect(X(t.x) - 1, Y(t.y) - 1, 2.2, 2.2);
+  // roads
   g.fillStyle = "#4b4f55";
-  g.fillRect(X(0), Y(500), W * sx, 70 * sy);
-  g.fillRect(X(0), Y(0), W * sx, BAND * sy); g.fillRect(X(0), Y(H - BAND), W * sx, BAND * sy);
-  g.fillRect(X(0), Y(0), BAND * sx, H * sy); g.fillRect(X(W - BAND), Y(0), BAND * sx, H * sy);
-  g.strokeStyle = "#4b4f55";
-  for (const r of ROAD_NET) { g.lineWidth = Math.max(2, r.w * sx); g.beginPath(); g.moveTo(X(r.a[0]), Y(r.a[1])); g.lineTo(X(r.b[0]), Y(r.b[1])); g.stroke(); }
-  for (const s of SOLID) { g.fillStyle = s.body; g.fillRect(X(s.x), Y(s.y), s.w * sx, s.h * sy); }
-  g.strokeStyle = "#4b4f55"; g.lineCap = "butt"; g.lineWidth = ROAD_W * sx;
+  g.fillRect(X(0), Y(500), L(W), L(70)); g.fillRect(X(0), Y(1002), L(W), L(32));
+  g.fillRect(X(0), Y(0), L(W), L(BAND)); g.fillRect(X(0), Y(H - BAND), L(W), L(BAND));
+  g.fillRect(X(0), Y(0), L(BAND), L(H)); g.fillRect(X(W - BAND), Y(0), L(BAND), L(H));
+  g.strokeStyle = "#4b4f55"; g.lineCap = "butt";
+  for (const r of ROAD_NET) { g.lineWidth = Math.max(2, L(r.w)); g.beginPath(); g.moveTo(X(r.a[0]), Y(r.a[1])); g.lineTo(X(r.b[0]), Y(r.b[1])); g.stroke(); }
+  g.lineWidth = L(ROAD_W);
   for (const [x1, y1, x2, y2] of SEGS) { g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke(); }
-  g.fillStyle = "#1e63c8";
-  for (const st of STOPS) { g.beginPath(); g.arc(X(st.x), Y(st.y), 3, 0, 7); g.fill(); }
-  g.fillStyle = "#ffd400"; g.beginPath(); g.arc(X(jm.position.x), Y(jm.position.z), 4, 0, 7); g.fill();
-  g.fillStyle = "#e0245e"; g.beginPath(); g.arc(X(PLAYER.x), Y(PLAYER.y), 4, 0, 7); g.fill();
+  g.strokeStyle = "#e9e2b5"; g.lineWidth = 1; g.setLineDash([5, 5]);
+  g.beginPath(); g.moveTo(X(0), Y(535)); g.lineTo(X(W), Y(535)); g.moveTo(X(0), Y(1018)); g.lineTo(X(W), Y(1018)); g.stroke(); g.setLineDash([]);
+  // buildings, with their names on the big map
+  g.textAlign = "center"; g.textBaseline = "middle";
+  for (const s of SOLID) {
+    g.fillStyle = s.body; g.fillRect(X(s.x), Y(s.y), L(s.w), L(s.h));
+    g.strokeStyle = s.trim; g.lineWidth = 1.2; g.strokeRect(X(s.x), Y(s.y), L(s.w), L(s.h));
+    if (bigMap || s.w > 330) { g.fillStyle = "#1a1a1a"; g.font = `${bigMap ? 12 : 11}px system-ui, sans-serif`; g.fillText(s.name.replace("Peanut ", "").replace(" Office", ""), X(s.x + s.w / 2), Y(s.y + s.h / 2)); }
+  }
+  // stops, the Joelmobile, your car and you
+  for (const st of STOPS) { g.fillStyle = "#1e63c8"; g.beginPath(); g.arc(X(st.x), Y(st.y), 4.5, 0, 7); g.fill(); g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke(); }
+  g.fillStyle = "#ffd400"; g.beginPath(); g.arc(X(jm.position.x), Y(jm.position.z), 5, 0, 7); g.fill();
+  if (drive.mesh && !drive.on) { g.fillStyle = "#ff8a00"; g.beginPath(); g.arc(X(drive.x), Y(drive.y), 4, 0, 7); g.fill(); }
+  g.fillStyle = "#e0245e"; g.beginPath(); g.arc(X(PLAYER.x), Y(PLAYER.y), 6, 0, 7); g.fill(); g.strokeStyle = "#fff"; g.lineWidth = 2; g.stroke();
+  // a compass and the title
+  g.fillStyle = "#fff"; g.font = "bold 16px system-ui, sans-serif"; g.textAlign = "left"; g.fillText("N ↑", 10, 18);
+  g.font = "13px system-ui, sans-serif"; g.textAlign = "right"; g.fillText(bigMap ? "Octee City (press M to shrink)" : "Octee City (M: big map)", w - 10, h - 12);
 }
 
 // ---- extra roads: asphalt, edge lines, kerbs, centre dashes, lamps and a zebra crossing ----
@@ -680,21 +762,19 @@ function addRoad(r) {
   }
 }
 for (const r of ROAD_NET) addRoad(r);
-function zebra(cx, cz, w, vertical) {
-  for (let i = -2; i <= 2; i++) {
-    const st = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? w - 6 : 4, vertical ? 4 : w - 6), mat("#f4f4f4"));
-    st.rotation.x = -Math.PI / 2; st.position.set(cx + (vertical ? 0 : i * 7), 0.08, cz + (vertical ? i * 7 : 0)); st.receiveShadow = true;
-    scene.add(st);
+// A zebra crossing spans the whole width of a road: bars run along the road, in a row across it.
+function crossing(cx, zTop, zBottom) {
+  for (let z = zTop + 4; z < zBottom - 2; z += 8) {
+    const bar = new THREE.Mesh(new THREE.PlaneGeometry(18, 4), mat("#f4f4f0"));
+    bar.rotation.x = -Math.PI / 2; bar.position.set(cx, 0.34, z); bar.receiveShadow = true; scene.add(bar);
   }
 }
-zebra(1650, 586, 24, true);
+
 
 // ---- more detail: crosswalk, awnings, benches, bins, lamps on the new roads, parked cars ----
-// Crosswalk across the main street, just west of the bus stop.
-for (let i = 0; i < 8; i++) {
-  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(5, 18), mat("#f4f4f0"));
-  stripe.rotation.x = -Math.PI / 2; stripe.position.set(410 + i * 9, 0.32, 535); scene.add(stripe);
-}
+// Crossings only where people actually cross: by the town square, east of the south-road junction, east of the side-road junction,
+// and across the south street by the grocery store.
+crossing(1110, 500, 570); crossing(1322, 500, 570); crossing(1624, 500, 570); crossing(1475, 1002, 1034);
 // Awning, bench and bin at each building's door.
 for (const s of B) {
   if (s.roof === "none") continue;
@@ -926,11 +1006,13 @@ function renderGarage() {
 }
 const nearCarPark = () => Math.hypot(PLAYER.x - 340, PLAYER.y - 745) < 150;
 function toggleGarage() {
+  if (inside.on) return;
   if (!garagePanel.hidden) { garagePanel.hidden = true; return; }
   if (!nearCarPark() || drive.on) { jmMsg = "The Car Park sells the cars. Walk to it on foot and press G."; return; }
   garagePanel.hidden = false; garage.msg = ""; renderGarage(); loadGarage();
 }
 function toggleCar() {
+  if (inside.on) return;
   if (!drive.mesh) { jmMsg = "You do not own a car yet. Buy one at the Car Park (press G there)."; return; }
   if (drive.on) {
     drive.on = false; drive.v = 0;
@@ -955,9 +1037,13 @@ function driveStep(dt) {
 }
 loadGarage();
 
+// Inside the shops (walk-inside.js)
+inside = createInside({ THREE, scene, mat, label, makeFigure, PLAYER, stage, B, tileTex, carApi, loggedIn: () => !!(cloudMod && cloudMod.cloudLinked()), free });
+
 // Input
 const KEYMAP = { w: "up", arrowup: "up", s: "down", arrowdown: "down", a: "left", arrowleft: "left", d: "right", arrowright: "right" };
 function action() {
+  if (inside.on) { inside.action(); return; }
   if (PLAYER.riding || drive.on) return;
   const s = nearestStop();
   if (s >= 0) {
@@ -965,16 +1051,19 @@ function action() {
     callJM(s); return;
   }
   const door = nearestDoor();
-  if (door) { location.href = door.href ? door.href : "index.html#" + door.id; }
+  if (door) { if (inside.canEnter(door)) inside.enter(door); else location.href = door.href ? door.href : "index.html#" + door.id; }
 }
 window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (KEYMAP[k]) { keys.add(KEYMAP[k]); e.preventDefault(); }
   if (k === "e") action();
   if (k === "n") setNight(!night);
+  if (k === "f") toggleFull();
+  if (k === "m") toggleBigMap();
+  if (k === "i") { if (inside.panelOpen) inside.close(); else inside.openBag(); }
   if (k === "v") toggleCar();
   if (k === "g") toggleGarage();
-  if (k === "escape") garagePanel.hidden = true;
+  if (k === "escape") { garagePanel.hidden = true; inside.close(); }
   if (PLAYER.riding && k >= "1" && k <= "4") { const b = ridePanel.querySelectorAll("button")[Number(k) - 1]; if (b) b.click(); }
 });
 window.addEventListener("keyup", (e) => { const k = e.key.toLowerCase(); if (KEYMAP[k]) keys.delete(KEYMAP[k]); });
@@ -994,6 +1083,12 @@ function resize() {
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 window.addEventListener("resize", resize);
+document.addEventListener("fullscreenchange", () => { resize(); setTimeout(resize, 120); });
+function toggleFull() {
+  if (document.fullscreenElement) { document.exitFullscreen && document.exitFullscreen(); return; }
+  if (stage.requestFullscreen) stage.requestFullscreen().catch(() => { jmMsg = "Your browser would not go full screen."; });
+  else jmMsg = "This browser has no full screen.";
+}
 resize();
 
 let last = performance.now();
@@ -1023,6 +1118,7 @@ function frame(now) {
   updateCars(dt);
   updatePeds(dt);
   updateLandscape(dt, now);
+  updateFia(dt);
   drawMini(now);
   // draw the player
   player3.position.set(PLAYER.x, 0, PLAYER.y);
@@ -1033,7 +1129,8 @@ function frame(now) {
   // camera
   cam.x += (PLAYER.x - cam.x) * Math.min(1, dt * 8);
   cam.y += (PLAYER.y - cam.y) * Math.min(1, dt * 8);
-  camera.position.set(cam.x - 60, 330, cam.y + 300);
+  const co = inside.on ? inside.camOffset : { x: -60, y: 330, z: 300 };
+  camera.position.set(cam.x + co.x, co.y, cam.y + co.z);
   camera.lookAt(cam.x, 20, cam.y);
   sun.position.set(cam.x - 500, 900, cam.y + 380);
   sun.target.position.set(cam.x, 0, cam.y);
@@ -1041,7 +1138,8 @@ function frame(now) {
   renderer.render(scene, camera);
   // the prompt
   let text = jmMsg;
-  if (!text) {
+  if (!text && inside.on) text = inside.prompt();
+  else if (!text) {
     const s = nearestStop();
     const door = nearestDoor();
     if (drive.on) text = "Driving. V to get out.";
@@ -1059,4 +1157,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // For tests: lets a script read where you are and what the Joelmobile is doing.
-window.__walk = { free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
+window.__walk = { inside, free, drive, garage, ownCar: (id) => { garage.mine = id; spawnMyCar(id); }, PLAYER, jmState, nearestDoor, nearestStop, STOPS, callJM, boardJM, ringPoint, get jmPos() { return { x: jm.position.x, z: jm.position.z }; } };
